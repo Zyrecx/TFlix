@@ -1,0 +1,20 @@
+{
+  "name": "@tflix/mods",
+  "version": "1.0.0",
+  "description": "TFlix mods build system",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "build": "rollup -c rollup.config.js"
+  },
+  "keywords": [],
+  "author": "TizenBrew Community",
+  "license": "MIT",
+  "dependencies": {
+    "@babel/preset-env": "^7.22.9",
+    "@rollup/plugin-babel": "^6.0.3",
+    "@rollup/plugin-terser": "^0.4.3",
+    "rollup": "^3.26.2",
+    "rollup-plugin-string": "^3.0.0"
+  }
+}
