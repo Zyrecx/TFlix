@@ -434,18 +434,18 @@
     }
 
     function setupRemoteControlSupport() {
-        // Register TV input device keys if available
-        if (typeof webapis !== 'undefined' && webapis.tv && webapis.tv.inputdevice) {
+        // Register TV input device keys if available (Tizen API)
+        const extraKeys = [
+            'MediaPlay', 'MediaPause', 'MediaStop', 'MediaRewind', 'MediaFastForward',
+            'VolumeUp', 'VolumeDown', 'VolumeMute'
+        ];
+        if (typeof tizen !== 'undefined' && tizen.tvinputdevice) {
             try {
-                webapis.tv.inputdevice.registerKey('MediaPlay');
-                webapis.tv.inputdevice.registerKey('MediaPause');
-                webapis.tv.inputdevice.registerKey('MediaStop');
-                webapis.tv.inputdevice.registerKey('MediaRewind');
-                webapis.tv.inputdevice.registerKey('MediaFastForward');
-                webapis.tv.inputdevice.registerKey('VolumeUp');
-                webapis.tv.inputdevice.registerKey('VolumeDown');
-                webapis.tv.inputdevice.registerKey('VolumeMute');
-                console.log('TV remote control keys registered');
+                tizen.tvinputdevice.registerKeyBatch(
+                    extraKeys,
+                    () => console.log('TV remote control keys registered'),
+                    err => console.log('TV input device registration failed:', err)
+                );
             } catch (error) {
                 console.log('TV input device registration failed:', error);
             }
