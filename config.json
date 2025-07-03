@@ -1,0 +1,95 @@
+{
+  "module": {
+    "name": "TFlix",
+    "version": "1.0.0",
+    "enabled": true,
+    "debug": false
+  },
+  "navigation": {
+    "focusTimeout": 300,
+    "scrollBehavior": "smooth",
+    "autoFocus": true,
+    "wrapNavigation": true,
+    "highlightColor": "#ff6b6b",
+    "focusScale": 1.05,
+    "animationDuration": 200
+  },
+  "video": {
+    "autoPlay": false,
+    "defaultVolume": 0.7,
+    "seekInterval": 10,
+    "volumeStep": 0.1,
+    "showControls": true,
+    "hideControlsDelay": 3000
+  },
+  "ui": {
+    "theme": "dark",
+    "fontSize": "large",
+    "reduceMotion": false,
+    "hideCursor": true,
+    "cursorHideDelay": 3000,
+    "enhanceCards": true,
+    "showFocusIndicator": true
+  },
+  "keys": {
+    "navigation": {
+      "up": ["ArrowUp"],
+      "down": ["ArrowDown"],
+      "left": ["ArrowLeft"],
+      "right": ["ArrowRight"],
+      "select": ["Enter", " "],
+      "back": ["Escape", "Return"]
+    },
+    "video": {
+      "playPause": ["MediaPlay", "MediaPause", " "],
+      "stop": ["MediaStop"],
+      "rewind": ["MediaRewind"],
+      "fastForward": ["MediaFastForward"],
+      "volumeUp": ["VolumeUp"],
+      "volumeDown": ["VolumeDown"],
+      "mute": ["VolumeMute"]
+    },
+    "shortcuts": {
+      "search": ["/"],
+      "home": ["h", "Home"],
+      "fullscreen": ["f", "F11"]
+    }
+  },
+  "service": {
+    "enabled": false,
+    "port": 3000,
+    "host": "localhost",
+    "cors": true,
+    "logging": true
+  },
+  "advanced": {
+    "elementSelectors": {
+      "focusable": [
+        "a[href]",
+        "button",
+        "[data-play=\"true\"]",
+        ".movie-card",
+        ".tv-card",
+        "input[type=\"text\"]",
+        "input[type=\"search\"]",
+        "[tabindex]:not([tabindex=\"-1\"])",
+        ".play-button",
+        ".video-controls button"
+      ],
+      "videos": ["video"],
+      "cards": [".movie-card", ".tv-card", "[href*=\"/movie/\"]", "[href*=\"/tv/\"]"]
+    },
+    "excludeSelectors": [
+      "[aria-hidden=\"true\"]",
+      ".hidden",
+      "[style*=\"display: none\"]",
+      "[style*=\"visibility: hidden\"]"
+    ],
+    "observeDOM": true,
+    "observeConfig": {
+      "childList": true,
+      "subtree": true,
+      "throttle": 100
+    }
+  }
+}
