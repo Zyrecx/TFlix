@@ -34,7 +34,7 @@
         // Find all focusable elements
         updateFocusableElements();
         
-        // Set initial focus
+        // Set initial focus to first nav or card
         if (focusableElements.length > 0) {
             setFocus(0);
         }
@@ -54,20 +54,24 @@
     }
 
     function updateFocusableElements() {
-        // Get all interactive elements
+        // Get all interactive elements, including nav bar
         const selectors = [
+            'nav a', // navigation bar links
+            '.nav a',
+            '.nav-item',
             'a[href]',
             'button',
             '[data-play="true"]',
             '.movie-card',
             '.tv-card',
+            '[href*="/movie/"]',
+            '[href*="/tv/"]',
             'input[type="text"]',
             'input[type="search"]',
             '[tabindex]:not([tabindex="-1"])',
             '.play-button',
             '.video-controls button'
         ];
-        
         focusableElements = Array.from(document.querySelectorAll(selectors.join(', ')))
             .filter(el => {
                 const rect = el.getBoundingClientRect();
@@ -108,48 +112,46 @@
         const key = event.key;
         
         // Prevent default browser behavior for arrow keys
-        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(key)) {
+        if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter"].includes(key)) {
             event.preventDefault();
         }
 
         switch (key) {
-            case 'ArrowDown':
+            case "ArrowDown":
                 navigateDown();
                 break;
-            case 'ArrowUp':
+            case "ArrowUp":
                 navigateUp();
                 break;
-            case 'ArrowLeft':
+            case "ArrowLeft":
                 navigateLeft();
                 break;
-            case 'ArrowRight':
+            case "ArrowRight":
                 navigateRight();
                 break;
-            case 'Enter':
+            case "Enter":
                 activateCurrentElement();
                 break;
-            case 'Escape':
-            case 'Return':
+            case "Escape":
+            case "Return":
                 handleBack();
                 break;
-            case 'MediaPlay':
-            case 'MediaPause':
+            case "MediaPlay":
+            case "MediaPause":
                 togglePlayPause();
                 break;
-            case 'MediaStop':
+            case "MediaStop":
                 stopVideo();
                 break;
-            case 'MediaRewind':
+            case "MediaRewind":
                 rewindVideo();
                 break;
-            case 'MediaFastForward':
+            case "MediaFastForward":
                 fastForwardVideo();
                 break;
             default:
-                // Handle number keys for quick navigation
-                if (key >= '0' && key <= '9') {
-                    handleNumberKey(parseInt(key));
-                }
+                // No number key navigation
+                break;
         }
     }
 
@@ -396,14 +398,6 @@
         if (!video) return;
         
         video.volume = Math.max(0, Math.min(1, video.volume + delta));
-    }
-
-    function handleNumberKey(number) {
-        // Quick navigation to sections
-        const sections = document.querySelectorAll('section, .content-section, .movie-grid');
-        if (number > 0 && number <= sections.length) {
-            sections[number - 1].scrollIntoView({ behavior: 'smooth' });
-        }
     }
 
     function setupUIEnhancements() {

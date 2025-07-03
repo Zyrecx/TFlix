@@ -1,38 +1,12 @@
 {
   "name": "tflix-tizenbrew",
   "version": "1.0.0",
-  "description": "TizenBrew module for the TFlix streaming service with enhanced TV controls",
-  "packageType": "mods",
+  "description": "Standalone fullscreen TFlix app for TizenBrew with enhanced TV remote navigation.",
+  "packageType": "app",
   "appName": "TFlix",
   "websiteURL": "https://www.cineby.app/",
+  "entry": "https://www.cineby.app/",
   "main": "src/tflix-mod.js",
-  "serviceFile": "src/service.js",
-  "keys": [
-    "ArrowUp",
-    "ArrowDown",
-    "ArrowLeft", 
-    "ArrowRight",
-    "Enter",
-    "Return",
-    "0",
-    "1",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "7",
-    "8",
-    "9",
-    "MediaPlay",
-    "MediaPause",
-    "MediaStop",
-    "MediaRewind",
-    "MediaFastForward",
-    "VolumeUp",
-    "VolumeDown",
-    "VolumeMute"
-  ],
   "author": "TizenBrew Community",
   "license": "MIT",
   "repository": {
@@ -46,20 +20,5 @@
     "tv",
     "samsung",
     "tizen"
-  ],
-  "dependencies": {
-    "express": "^4.18.2",
-    "cors": "^2.8.5"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.2"
-  },
-  "scripts": {
-    "start": "node src/service.js",
-    "dev": "nodemon src/service.js",
-    "test": "echo \"No tests specified\" && exit 0"
-  },
-  "engines": {
-    "node": ">=14.0.0"
-  }
+  ]
 }
