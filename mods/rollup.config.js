@@ -1,25 +1,23 @@
-import { string } from 'rollup-plugin-string';
+import { babel } from '@rollup/plugin-babel';
 import terser from '@rollup/plugin-terser';
-import getBabelOutputPlugin from '@rollup/plugin-babel';
+import { string } from 'rollup-plugin-string';
 
-export default {
-    input: "userScript.js",
-    output: { file: "../dist/userScript.js", format: "iife" },
+export default [
+  {
+    input: 'userScript.js',
+    output: {
+      file: '../dist/userScript.js',
+      format: 'iife'
+    },
     plugins: [
-        string({
-            include: "**/*.css",
-        }),
-        terser({
-            ecma: '5',
-            mangle: true,
-        }),
-        getBabelOutputPlugin({
-            babelHelpers: 'bundled',
-            presets: [
-                ['@babel/preset-env', {
-                    targets: 'Chrome 47',
-                }],
-            ],
-        }),
+      string({
+        include: '**/*.css'
+      }),
+      babel({
+        babelHelpers: 'bundled',
+        presets: ['@babel/preset-env']
+      }),
+      terser()
     ]
-};
+  }
+];

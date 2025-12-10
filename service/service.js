@@ -1,40 +1,28 @@
-const express = require('express');
-const cors = require('cors');
-const app = express();
+/**
+ * TFlix service module
+ * Handles communication with TizenBrew and other service-related tasks
+ */
 
-const corsOptions = {
-    origin: '*',
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-    credentials: true,
-    optionsSuccessStatus: 204
-};
+// Register keys for media controls using Samsung's TVInputDevice API
+// See: https://developer.samsung.com/smarttv/develop/api-references/tizen-web-device-api-references/tvinputdevice-api.html
+try {
+  // Media control keys
+  tizen.tvinputdevice.registerKey('MediaPlayPause');
+  tizen.tvinputdevice.registerKey('MediaPlay');
+  tizen.tvinputdevice.registerKey('MediaPause');
+  tizen.tvinputdevice.registerKey('MediaStop');
+  tizen.tvinputdevice.registerKey('MediaFastForward');
+  tizen.tvinputdevice.registerKey('MediaRewind');
+  tizen.tvinputdevice.registerKey('MediaTrackNext');
+  tizen.tvinputdevice.registerKey('MediaTrackPrevious');
 
-app.use(cors(corsOptions));
-
-const PORT = 8085;
-
-// Health check endpoint
-app.get('/health', (req, res) => {
-    res.json({
-        status: 'healthy',
-        service: 'TFlix TV Service',
-        version: '1.0.0'
-    });
-});
-
-// API routes for TFlix
-app.get('/api/status', (req, res) => {
-    res.json({
-        status: 'online',
-        service: 'TFlix',
-        timestamp: new Date().toISOString()
-    });
-});
-
-// Start the server
-app.listen(PORT, () => {
-    console.log(`TFlix service listening on port ${PORT}`);
-});
-
-// Make the app accessible to tizen API
-module.exports = app;
+  // Navigation and control keys
+  tizen.tvinputdevice.registerKey('Back');
+  tizen.tvinputdevice.registerKey('Enter');
+  tizen.tvinputdevice.registerKey('ArrowUp');
+  tizen.tvinputdevice.registerKey('ArrowDown');
+  tizen.tvinputdevice.registerKey('ArrowLeft');
+  tizen.tvinputdevice.registerKey('ArrowRight');
+} catch (e) {
+  // Silent error handling - no console logs
+}

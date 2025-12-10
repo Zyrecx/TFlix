@@ -1,20 +1,30 @@
 {
-  "name": "@tflix/mods",
+  "name": "@zyrecx/tflix-mods",
   "version": "1.0.0",
-  "description": "TFlix mods build system",
+  "description": "TFlix module for Cineby.gd",
   "main": "index.js",
   "type": "module",
   "scripts": {
     "build": "rollup -c rollup.config.js"
   },
-  "keywords": [],
-  "author": "TizenBrew Community",
+  "keywords": [
+    "tizenbrew",
+    "tizen",
+    "samsung",
+    "tv",
+    "cineby"
+  ],
+  "author": "Zyrex",
   "license": "MIT",
   "dependencies": {
     "@babel/preset-env": "^7.22.9",
     "@rollup/plugin-babel": "^6.0.3",
     "@rollup/plugin-terser": "^0.4.3",
     "rollup": "^3.26.2",
-    "rollup-plugin-string": "^3.0.0"
+    "rollup-plugin-string": "^3.0.0",
+    "whatwg-fetch": "^3.6.2"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

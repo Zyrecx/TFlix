@@ -1,0 +1,210 @@
+/* TFlix UI Enhancement Styles */
+
+/* Focus highlighting for navigation */
+.tflix-focused {
+  transform: scale(1.05);
+  box-shadow: 0 0 10px 2px rgba(255, 255, 255, 0.8);
+  transition: all 0.2s ease;
+  z-index: 100;
+  position: relative;
+  outline: none !important;
+}
+
+/* Ensure focused items are clearly visible */
+.tflix-focused img {
+  border: 2px solid rgba(255, 255, 255, 0.9);
+}
+
+/* Add a glow effect for movie/show tiles */
+.tflix-focused::before {
+  content: '';
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  right: -3px;
+  bottom: -3px;
+  border: 2px solid #FFFFFF;
+  border-radius: 3px;
+  box-shadow: 0 0 15px 3px rgba(255, 255, 255, 0.5);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Hide cursor when using remote navigation */
+body.tflix-navigation-mode {
+  cursor: none !important;
+}
+
+/* Video player controls enhancements for TV remote */
+.tflix-player-controls {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+  padding: 20px;
+  z-index: 999;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.tflix-player-controls.show {
+  opacity: 1;
+}
+
+.tflix-control-button {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  color: white;
+  font-size: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 10px;
+  cursor: pointer;
+}
+
+.tflix-control-button.focused,
+.tflix-control-button:hover {
+  background: rgba(255, 255, 255, 0.6);
+  transform: scale(1.1);
+}
+
+.tflix-progress-bar {
+  width: 70%;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 5px;
+  margin: 0 20px;
+  position: relative;
+}
+
+.tflix-progress-filled {
+  height: 100%;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 5px;
+  width: 0%;
+}
+
+.tflix-toast {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 10px 20px;
+  border-radius: 5px;
+  z-index: 9999;
+  font-size: 18px;
+  opacity: 0;
+  transform: translateY(-20px);
+  transition: all 0.3s ease;
+}
+
+.tflix-toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Enhanced Search Element Styling */
+.tflix-search-element {
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.tflix-search-element:focus,
+.tflix-search-element:hover {
+  transform: scale(1.1);
+  box-shadow: 0 0 15px 3px rgba(255, 255, 255, 0.5);
+  z-index: 200;
+}
+
+/* Video info toast */
+.tflix-video-toast {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.9);
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 15px 30px;
+  border-radius: 8px;
+  z-index: 10000;
+  font-size: 24px;
+  opacity: 0;
+  transition: all 0.3s ease;
+}
+
+.tflix-video-toast.show {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+/* Video time display */
+.tflix-video-time {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 8px 12px;
+  border-radius: 5px;
+  font-size: 16px;
+  z-index: 9998;
+}
+
+/* Enhanced Play Button styling */
+.tflix-play-button {
+  transform: scale(1.05);
+  transition: all 0.2s ease;
+  position: relative;
+  z-index: 100;
+  box-shadow: 0 0 15px rgba(255, 255, 255, 0.3);
+}
+
+.tflix-play-button::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: -5px;
+  right: -5px;
+  bottom: -5px;
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  border-radius: 5px;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.8;
+}
+
+.tflix-play-button:hover,
+.tflix-play-button:focus,
+.tflix-play-button.tflix-focused {
+  transform: scale(1.1);
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.6);
+}
+
+.tflix-play-button:hover::before,
+.tflix-play-button:focus::before,
+.tflix-play-button.tflix-focused::before {
+  border-color: white;
+  box-shadow: 0 0 15px 5px rgba(255, 255, 255, 0.5);
+}
+
+/* Loading indicator for video */
+.tflix-loading {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 20px 40px;
+  border-radius: 10px;
+  font-size: 20px;
+  z-index: 9999;
+}

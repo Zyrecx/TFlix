@@ -1,8 +1,8 @@
-// Import the TFlix module code
-import tflixMod from './tflix-mod.js';
+import 'whatwg-fetch';
+import './spatial-navigation-polyfill.js';
+import './ui.js';
+import './contentDetector.js';
+import { initializePerformanceOptimizations } from './performance.js';
 
-// Execute the TFlix module
-tflixMod();
-
-// Import any CSS files if needed
-// import './ui.css';
+// Initialize performance optimizations early
+initializePerformanceOptimizations();

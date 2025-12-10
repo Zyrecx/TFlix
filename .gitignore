@@ -1,0 +1,26 @@
+# Node dependencies
+node_modules/
+
+# Build output
+/dist/
+
+# Logs
+npm-debug.log*
+yarn-error.log*
+*.log
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Packaging artifacts
+*.tgz
+
+# Repo-only docs
+NPM-PUBLISHING.md
+MODULES.md
+TFlix-Description.md
+.github/
+
+# Scripts
+*.bat
