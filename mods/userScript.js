@@ -1,3 +1,4 @@
+import './antiDevtool.js';
 import 'whatwg-fetch';
 import './spatial-navigation-polyfill.js';
 import './ui.js';
