@@ -2,6 +2,38 @@
  * Cineby.at Content Detector and Enhancer
  * This module detects and enhances specific elements on Cineby.at
  */
+import { isRealCinebyPlayer } from './playerDetection.js';
+
+/**
+ * Mark an element as enhanced for a given pass, so repeated observer runs don't attach
+ * a second copy of every listener. Each enhancement pass previously re-bound focus/blur/click
+ * with fresh closures on every DOM mutation, so listeners grew without bound and the page
+ * got progressively slower the longer it stayed open.
+ *
+ * @param {Element} element - element to mark
+ * @param {string} pass - name of the enhancement pass
+ * @returns {boolean} - true if this element still needs enhancing
+ */
+function claimForEnhancement(element, pass) {
+  const attr = `data-tflix-${pass}`;
+  if (element.hasAttribute(attr)) return false;
+  element.setAttribute(attr, '');
+  return true;
+}
+
+/**
+ * Add the standard focus highlight listeners to an element
+ * @param {Element} element - element to wire up
+ */
+function addFocusHighlight(element) {
+  element.addEventListener('focus', () => {
+    element.classList.add('tflix-focused');
+  });
+
+  element.addEventListener('blur', () => {
+    element.classList.remove('tflix-focused');
+  });
+}
 
 /**
  * Detect and enhance content cards/items
@@ -29,14 +61,16 @@ function enhanceContentItems() {
   
   // Make each item focusable and add navigation attributes
   contentItems.forEach((item, index) => {
+    if (!claimForEnhancement(item, 'item')) return;
+
     // Ensure the item is focusable
     if (!item.getAttribute('tabindex')) {
       item.setAttribute('tabindex', '0');
     }
-    
+
     // Add data attribute for easier selection
-    item.setAttribute('data-tflix-item', index);
-    
+    item.setAttribute('data-tflix-index', index);
+
     // Special handling for Cineby.at
     if (window.location.hostname.includes('cineby.at')) {
       const anchor = item.tagName === 'A' ? item : item.querySelector('a');
@@ -75,16 +109,9 @@ function enhanceContentItems() {
       }
     }
     
-    // Add focus and blur event listeners
-    item.addEventListener('focus', () => {
-      item.classList.add('tflix-focused');
-    });
-    
-    item.addEventListener('blur', () => {
-      item.classList.remove('tflix-focused');
-    });
+    addFocusHighlight(item);
   });
-  
+
   // For Cineby.at, detect and enhance play buttons specifically
   if (window.location.hostname.includes('cineby.at')) {
     enhanceCinebyPlayButtons();
@@ -112,22 +139,17 @@ function enhanceNavigationMenus() {
     const navItems = nav.querySelectorAll('a, button');
     
     navItems.forEach((item, index) => {
+      if (!claimForEnhancement(item, 'nav-item')) return;
+
       // Ensure the item is focusable
       if (!item.getAttribute('tabindex')) {
         item.setAttribute('tabindex', '0');
       }
-      
+
       // Add data attribute for easier selection
-      item.setAttribute('data-tflix-nav-item', index);
-      
-      // Add focus and blur event listeners
-      item.addEventListener('focus', () => {
-        item.classList.add('tflix-focused');
-      });
-      
-      item.addEventListener('blur', () => {
-        item.classList.remove('tflix-focused');
-      });
+      item.setAttribute('data-tflix-nav-index', index);
+
+      addFocusHighlight(item);
     });
   });
 }
@@ -142,22 +164,17 @@ function enhanceVideoPlayer() {
   // Add focus capability to native controls if they exist
   const controls = document.querySelectorAll('.video-controls button, .player-controls button');
   controls.forEach((control, index) => {
+    if (!claimForEnhancement(control, 'control')) return;
+
     // Ensure the control is focusable
     if (!control.getAttribute('tabindex')) {
       control.setAttribute('tabindex', '0');
     }
-    
+
     // Add data attribute for easier selection
-    control.setAttribute('data-tflix-control', index);
-    
-    // Add focus and blur event listeners
-    control.addEventListener('focus', () => {
-      control.classList.add('tflix-focused');
-    });
-    
-    control.addEventListener('blur', () => {
-      control.classList.remove('tflix-focused');
-    });
+    control.setAttribute('data-tflix-control-index', index);
+
+    addFocusHighlight(control);
   });
 }
 
@@ -186,6 +203,8 @@ function enhanceSearchFunctionality() {
   const searchElements = document.querySelectorAll(searchSelectors.join(', '));
   
   searchElements.forEach(element => {
+    if (!claimForEnhancement(element, 'search')) return;
+
     // Make the search element more prominent and focusable
     element.setAttribute('tabindex', '0');
     element.setAttribute('data-tflix-search', 'true');
@@ -229,9 +248,8 @@ function addSearchNavigationHandler() {
       a.getAttribute('aria-label')?.toLowerCase().includes('search')
     );
     
-    if (searchLink) {
+    if (searchLink && claimForEnhancement(searchLink, 'search-nav')) {
       searchLink.setAttribute('tabindex', '0');
-      searchLink.setAttribute('data-tflix-search-nav', 'true');
       
       // Add clear styling
       searchLink.classList.add('tflix-search-element');
@@ -363,8 +381,11 @@ function enhanceCinebyVideoPlayer() {
  * @param {HTMLElement} video - The video element
  */
 function setupVideoPlayerControls(video) {
-  if (!video) return;
-  
+  // Cineby's decorative hero trailer matches the same /movie/ + <video> detection this function
+  // is reached from; it isn't the real player and Cineby already handles it fine on its own.
+  // See playerDetection.js and the matching gate in ui.js's enhanceVideoPlayer.
+  if (!video || !isRealCinebyPlayer(video)) return;
+
   // Store reference to the video
   window.tflixVideoElement = video;
   
@@ -375,10 +396,10 @@ function setupVideoPlayerControls(video) {
   
   // Enable native controls as a fallback
   video.controls = true;
-  
-  // Add our own key event listeners to control playback
-  document.addEventListener('keydown', handleVideoKeyEvents);
-  
+
+  // Playback keys are owned by ui.js (handleCinebyVideoKeyEvents). Registering a second
+  // document-level handler here made every arrow press seek twice and raced two toasts.
+
   // Set initial volume
   if (video.volume > 0.8) {
     video.volume = 0.8; // Default to 80% volume
@@ -386,49 +407,6 @@ function setupVideoPlayerControls(video) {
   
   // Add time display
   addVideoTimeDisplay(video);
-}
-
-/**
- * Handle key events for video playback
- * @param {Event} e - The keydown event
- */
-function handleVideoKeyEvents(e) {
-  const video = window.tflixVideoElement;
-  if (!video) return;
-  
-  // Check if we're on a video page
-  if (!window.location.pathname.includes('/movie/')) return;
-  
-  switch (e.key) {
-    case 'Enter':
-      e.preventDefault();
-      if (video.paused) {
-        video.play();
-      } else {
-        video.pause();
-      }
-      break;
-    case 'ArrowUp':
-      e.preventDefault();
-      video.volume = Math.min(1, video.volume + 0.1);
-      showVideoInfoToast(`Volume: ${Math.round(video.volume * 100)}%`);
-      break;
-    case 'ArrowDown':
-      e.preventDefault();
-      video.volume = Math.max(0, video.volume - 0.1);
-      showVideoInfoToast(`Volume: ${Math.round(video.volume * 100)}%`);
-      break;
-    case 'ArrowLeft':
-      e.preventDefault();
-      video.currentTime = Math.max(0, video.currentTime - 10);
-      showVideoInfoToast(`- 10 seconds`);
-      break;
-    case 'ArrowRight':
-      e.preventDefault();
-      video.currentTime = Math.min(video.duration, video.currentTime + 10);
-      showVideoInfoToast(`+ 10 seconds`);
-      break;
-  }
 }
 
 /**
@@ -534,8 +512,10 @@ function enhanceCinebyPlayButtons() {
   const allButtons = document.querySelectorAll('button, a, div[role="button"]');
   
   allButtons.forEach(button => {
+    if (button.hasAttribute('data-tflix-play-button')) return;
+
     // Check if it's likely a play button
-    const isPlayButton = 
+    const isPlayButton =
       button.textContent?.toLowerCase().includes('play') ||
       button.textContent?.toLowerCase().includes('watch') ||
       button.getAttribute('aria-label')?.toLowerCase().includes('play') ||
@@ -580,14 +560,7 @@ function enhanceCinebyPlayButtons() {
         }, 50);
       });
       
-      // Add focus effect
-      button.addEventListener('focus', () => {
-        button.classList.add('tflix-focused');
-      });
-      
-      button.addEventListener('blur', () => {
-        button.classList.remove('tflix-focused');
-      });
+      addFocusHighlight(button);
     }
   });
 }
@@ -658,15 +631,24 @@ function initializeContentEnhancements() {
   // First run
   detectAndEnhanceContent();
   
-  // Set up observer to continue detecting as the DOM changes
+  // Set up observer to continue detecting as the DOM changes.
+  //
+  // This must be debounced: the enhancement pass runs ~10 querySelectorAll sweeps over the
+  // whole document and appends nodes of its own, so an undebounced observer re-triggers
+  // itself and thrashes continuously against a React app's re-renders.
+  let pending = null;
   const observer = new MutationObserver(() => {
-    detectAndEnhanceContent();
+    if (pending) return;
+    pending = setTimeout(() => {
+      pending = null;
+      detectAndEnhanceContent();
+    }, 250);
   });
-  
+
   // Start observing document body for DOM changes
-  observer.observe(document.body, { 
-    childList: true, 
-    subtree: true 
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
   });
 }
 

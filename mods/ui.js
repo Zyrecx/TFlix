@@ -1,5 +1,6 @@
 /*global navigate*/
 import css from './ui.css';
+import { isRealCinebyPlayer } from './playerDetection.js';
 
 let videoElement = null;
 let playerControls = null;
@@ -242,8 +243,15 @@ function setupVideoPlayerObserver() {
  * @param {HTMLElement} video - The video element to enhance
  */
 function enhanceVideoPlayer(video) {
+  // Cineby renders a muted, non-interactive background hero trailer on every /movie/ and /tv/
+  // detail page - it matches this same MutationObserver detection path, but it isn't the real
+  // player and Cineby already renders/controls it correctly on its own. Previously nothing told
+  // the two apart, so the trailer got forced fullscreen, given a custom OSD, and had arrow keys
+  // hijacked for seek/volume before the user had even pressed Play. Leave it alone entirely.
+  if (!isRealCinebyPlayer(video)) return;
+
   videoElement = video;
-  
+
   // Fix common video playback issues
   fixVideoPlaybackIssues(video);
   
@@ -416,14 +424,32 @@ function handleCinebyVideoKeyEvents(e) {
   }
 }
 
+// Keyed by video element so a fresh <video> (new playback attempt) always starts at zero
+// retries with no manual reset needed, and entries are garbage-collected once the element
+// leaves the DOM.
+const videoErrorRetryCounts = new WeakMap();
+const MAX_VIDEO_ERROR_RETRIES = 2;
+
 /**
  * Handle video playback errors
  * @param {Event} e - Error event
  */
 function handleVideoError(e) {
   const errorMessage = getVideoErrorMessage(videoElement.error ? videoElement.error.code : 0);
-  showToast(`Video error: ${errorMessage}. Trying to recover...`);
-  
+
+  const retries = (videoErrorRetryCounts.get(videoElement) || 0) + 1;
+  videoErrorRetryCounts.set(videoElement, retries);
+
+  if (retries > MAX_VIDEO_ERROR_RETRIES) {
+    // Stop rather than loop forever: the recovery below can reset src back to the exact value
+    // that just failed, which simply re-triggers the same error event indefinitely - that
+    // self-sustaining loop is what "kept refreshing and showing video error" was.
+    showToast('Could not play this video. Press Back and try again.');
+    return;
+  }
+
+  showToast(`Video error: ${errorMessage}. Trying to recover... (${retries}/${MAX_VIDEO_ERROR_RETRIES})`);
+
   // Store the current video source and position
   const currentSrc = videoElement.src;
   const currentTime = videoElement.currentTime || 0;

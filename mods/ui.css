@@ -1,33 +1,22 @@
 /* TFlix UI Enhancement Styles */
 
-/* Focus highlighting for navigation */
+/* Focus highlighting for navigation.
+ *
+ * The ring is drawn INWARD via inset box-shadow, not outline/outer box-shadow. Movie and show
+ * cards on this site wrap their poster art in a div with overflow:hidden (for the rounded
+ * corners), sized to exactly match the card - any highlight painted outside the card's own box
+ * (outline, outer box-shadow, or a scale() transform that grows past the wrapper) gets clipped
+ * by that ancestor and is invisible. An inset shadow never leaves the element's own box, so it
+ * survives being inside a clipping ancestor; it's how the highlight is visible on cards at all,
+ * not just on buttons that happen to sit outside such wrappers. */
 .tflix-focused {
-  transform: scale(1.05);
-  box-shadow: 0 0 10px 2px rgba(255, 255, 255, 0.8);
-  transition: all 0.2s ease;
-  z-index: 100;
-  position: relative;
+  box-shadow:
+    inset 0 0 0 4px #FFFFFF,
+    inset 0 0 0 8px rgba(0, 0, 0, 0.65) !important;
   outline: none !important;
-}
-
-/* Ensure focused items are clearly visible */
-.tflix-focused img {
-  border: 2px solid rgba(255, 255, 255, 0.9);
-}
-
-/* Add a glow effect for movie/show tiles */
-.tflix-focused::before {
-  content: '';
-  position: absolute;
-  top: -3px;
-  left: -3px;
-  right: -3px;
-  bottom: -3px;
-  border: 2px solid #FFFFFF;
-  border-radius: 3px;
-  box-shadow: 0 0 15px 3px rgba(255, 255, 255, 0.5);
-  pointer-events: none;
-  z-index: -1;
+  border-radius: 4px;
+  position: relative;
+  z-index: 100;
 }
 
 /* Hide cursor when using remote navigation */
@@ -158,41 +147,26 @@ body.tflix-navigation-mode {
   z-index: 9998;
 }
 
-/* Enhanced Play Button styling */
+/* Enhanced Play Button styling. The site's own "is this a play button" heuristic
+ * (mods/contentDetector.js enhanceCinebyPlayButtons) matches on "has an svg child", which also
+ * catches ordinary movie/show cards - so this class lands on grid cards too, not just the real
+ * Play/Watch buttons. It previously carried a permanent outline and scale(1.05) even when not
+ * focused, which on a card meant an always-on ring (clipped by the card's overflow:hidden
+ * wrapper, so invisible - see .tflix-focused) plus a permanent 5% zoom cropping the poster.
+ * Base state is now a no-op; only the interaction states below draw anything, and they use the
+ * same inset-shadow approach as .tflix-focused so they're never clipped either. */
 .tflix-play-button {
-  transform: scale(1.05);
-  transition: all 0.2s ease;
   position: relative;
   z-index: 100;
-  box-shadow: 0 0 15px rgba(255, 255, 255, 0.3);
-}
-
-.tflix-play-button::before {
-  content: '';
-  position: absolute;
-  top: -5px;
-  left: -5px;
-  right: -5px;
-  bottom: -5px;
-  border: 2px solid rgba(255, 255, 255, 0.7);
-  border-radius: 5px;
-  pointer-events: none;
-  z-index: -1;
-  opacity: 0.8;
 }
 
 .tflix-play-button:hover,
 .tflix-play-button:focus,
 .tflix-play-button.tflix-focused {
-  transform: scale(1.1);
-  box-shadow: 0 0 20px rgba(255, 255, 255, 0.6);
-}
-
-.tflix-play-button:hover::before,
-.tflix-play-button:focus::before,
-.tflix-play-button.tflix-focused::before {
-  border-color: white;
-  box-shadow: 0 0 15px 5px rgba(255, 255, 255, 0.5);
+  box-shadow:
+    inset 0 0 0 4px #FFFFFF,
+    inset 0 0 0 8px rgba(0, 0, 0, 0.65) !important;
+  outline: none !important;
 }
 
 /* Loading indicator for video */

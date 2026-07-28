@@ -4,6 +4,8 @@ node_modules/
 .github
 .vscode/
 .idea/
+dev/
+LOCAL-TESTING.md
 # Source files (since we're publishing the built files)
 mods/node_modules/
 service/node_modules/
