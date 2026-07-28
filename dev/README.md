@@ -1,6 +1,6 @@
 # TFlix desktop testing
 
-Lets you exercise TFlix in Chrome instead of reinstalling on the TV for every change.
+Lets you test TFlix in Chrome instead of reinstalling on the TV for every change.
 Nothing in this folder ships to npm (see `.npmignore`).
 
 ## Setup

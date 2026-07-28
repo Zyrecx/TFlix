@@ -51,6 +51,7 @@ TFlix is a TizenBrew module that transforms [Cineby.at](https://www.cineby.at/) 
 - `mods/` - Contains the JavaScript modules for enhancing Cineby.at
 - `service/` - Contains the service code for handling TV functionality
 - `dist/` - Contains the built module files
+- `dev/` - Local testing setup, no TV required (see below)
 
 ### Building
 
@@ -61,6 +62,14 @@ To build the project, run:
 ```
 
 This will install dependencies and build both the mods and service modules.
+
+### Testing Locally (No TV Required)
+
+**[→ dev/README.md](dev/README.md)** - run TFlix in a desktop browser instead of reinstalling on your TV for every change.
+
+## Support
+
+I don't have a lot of time to test regularly on my own TV, so if something's broken, please [open an issue](https://github.com/Zyrecx/TFlix/issues) — I'll do my best to fix it when I can.
 
 ## License
 
