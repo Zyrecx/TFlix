@@ -123,8 +123,8 @@ function setupMediaControlListeners() {
 function handleBackButton(e) {
   e.preventDefault(); // Prevent default back behavior
   
-  // Special handling for Cineby.gd
-  if (window.location.hostname.includes('cineby.gd')) {
+  // Special handling for Cineby.at
+  if (window.location.hostname.includes('cineby.at')) {
     // Check if we're in a video player mode
     if (videoElement && videoElement.parentElement && 
         (document.fullscreenElement || 
@@ -325,8 +325,8 @@ function fixVideoPlaybackIssues(video) {
     video.setAttribute('preload', 'auto');
   }
   
-  // Special handling for Cineby.gd
-  if (window.location.hostname.includes('cineby.gd')) {
+  // Special handling for Cineby.at
+  if (window.location.hostname.includes('cineby.at')) {
     // Make sure we can manipulate the video
     video.setAttribute('controlsList', 'nodownload');
     
@@ -428,8 +428,8 @@ function handleVideoError(e) {
   const currentSrc = videoElement.src;
   const currentTime = videoElement.currentTime || 0;
   
-  // Special handling for Cineby.gd
-  if (window.location.hostname.includes('cineby.gd')) {
+  // Special handling for Cineby.at
+  if (window.location.hostname.includes('cineby.at')) {
     // For Cineby, try a more aggressive recovery approach
     
     // First, check if it's just a missing source or corruption

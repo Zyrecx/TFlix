@@ -1,6 +1,6 @@
 /**
- * Cineby.gd Content Detector and Enhancer
- * This module detects and enhances specific elements on Cineby.gd
+ * Cineby.at Content Detector and Enhancer
+ * This module detects and enhances specific elements on Cineby.at
  */
 
 /**
@@ -37,8 +37,8 @@ function enhanceContentItems() {
     // Add data attribute for easier selection
     item.setAttribute('data-tflix-item', index);
     
-    // Special handling for Cineby.gd
-    if (window.location.hostname.includes('cineby.gd')) {
+    // Special handling for Cineby.at
+    if (window.location.hostname.includes('cineby.at')) {
       const anchor = item.tagName === 'A' ? item : item.querySelector('a');
       if (anchor && anchor.href && anchor.href.includes('/movie/')) {
         // Add a special click handler for Cineby movie links
@@ -85,8 +85,8 @@ function enhanceContentItems() {
     });
   });
   
-  // For Cineby.gd, detect and enhance play buttons specifically
-  if (window.location.hostname.includes('cineby.gd')) {
+  // For Cineby.at, detect and enhance play buttons specifically
+  if (window.location.hostname.includes('cineby.at')) {
     enhanceCinebyPlayButtons();
   }
 }
@@ -246,8 +246,8 @@ function addSearchNavigationHandler() {
     }
   });
   
-  // If the site is cineby.gd, specifically look for the search link
-  if (window.location.hostname.includes('cineby.gd')) {
+  // If the site is cineby.at, specifically look for the search link
+  if (window.location.hostname.includes('cineby.at')) {
     // Make search more accessible without requiring keyboard shortcuts
     const searchLinks = document.querySelectorAll('a[href*="search"]');
     searchLinks.forEach(link => {
@@ -295,9 +295,9 @@ function activateSearch(element) {
     return;
   }
   
-  // For cineby.gd specifically, navigate to the search page
-  if (window.location.hostname.includes('cineby.gd')) {
-    window.location.href = 'https://www.cineby.gd/search';
+  // For cineby.at specifically, navigate to the search page
+  if (window.location.hostname.includes('cineby.at')) {
+    window.location.href = 'https://www.cineby.at/search';
     return;
   }
 }
@@ -326,7 +326,7 @@ function showSearchToast() {
 }
 
 /**
- * Enhance video player with better controls specifically for Cineby.gd
+ * Enhance video player with better controls specifically for Cineby.at
  */
 function enhanceCinebyVideoPlayer() {
   // Only run on movie pages
@@ -359,7 +359,7 @@ function enhanceCinebyVideoPlayer() {
 }
 
 /**
- * Setup video player controls for Cineby.gd
+ * Setup video player controls for Cineby.at
  * @param {HTMLElement} video - The video element
  */
 function setupVideoPlayerControls(video) {
@@ -503,7 +503,7 @@ function showVideoInfoToast(message) {
 }
 
 /**
- * Enhance play buttons specifically for Cineby.gd
+ * Enhance play buttons specifically for Cineby.at
  */
 function enhanceCinebyPlayButtons() {
   // Only run on movie info pages
@@ -593,7 +593,7 @@ function enhanceCinebyPlayButtons() {
 }
 
 /**
- * Set up a video monitor specifically for Cineby.gd
+ * Set up a video monitor specifically for Cineby.at
  * to ensure video plays correctly after clicking play
  */
 function setupCinebyVideoMonitor() {
@@ -680,8 +680,8 @@ function detectAndEnhanceContent() {
   enhanceSearchFunctionality();
   enhanceCinebyVideoPlayer();
   
-  // Special handling for Cineby.gd on movie info pages
-  if (window.location.hostname.includes('cineby.gd') && 
+  // Special handling for Cineby.at on movie info pages
+  if (window.location.hostname.includes('cineby.at') && 
       window.location.pathname.includes('/movie/')) {
     enhanceCinebyPlayButtons();
   }

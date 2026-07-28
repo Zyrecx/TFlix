@@ -2,9 +2,9 @@
   "name": "@zyrecx/tflix",
   "appName": "TFlix",
   "version": "1.4.1",
-  "description": "TFlix transforms Cineby.gd into a TV-friendly experience for Samsung TVs running TizenBrew with enhanced remote navigation.",
+  "description": "TFlix transforms Cineby.at into a TV-friendly experience for Samsung TVs running TizenBrew with enhanced remote navigation.",
   "packageType": "mods",
-  "websiteURL": "https://www.cineby.gd",
+  "websiteURL": "https://www.cineby.at",
   "main": "dist/userScript.js",
   "scripts": {
     "build": "cd mods && npm install && npm run build && cd ../service && npm install && npm run build && cd ..",
