@@ -661,11 +661,38 @@ function detectAndEnhanceContent() {
   enhanceVideoPlayer();
   enhanceSearchFunctionality();
   enhanceCinebyVideoPlayer();
-  
+
+  // ui.js can run before Cineby's asynchronously rendered cards have been given a tabindex.
+  // Calling focus() on a plain card at that point is a no-op, leaving document.body active;
+  // spatial navigation then has no meaningful starting rectangle and the remote appears to
+  // merely scroll the page. Once enhancement has made the cards focusable, establish a real
+  // starting point if nothing else currently owns focus.
+  ensureInitialContentFocus();
+
   // Special handling for Cineby.at on movie info pages
-  if (window.location.hostname.includes('cineby.at') && 
+  if (window.location.hostname.includes('cineby.at') &&
       window.location.pathname.includes('/movie/')) {
     enhanceCinebyPlayButtons();
+  }
+}
+
+/**
+ * Focus the first enhanced content item when the page has no usable focus target.
+ */
+function ensureInitialContentFocus() {
+  const active = document.activeElement;
+  if (active && active !== document.body && active !== document.documentElement) return;
+
+  const firstItem = document.querySelector('[data-tflix-index]');
+  if (!firstItem) return;
+
+  const previous = document.querySelector('.tflix-focused');
+  if (previous && previous !== firstItem) previous.classList.remove('tflix-focused');
+
+  firstItem.classList.add('tflix-focused');
+  firstItem.focus();
+  if (window.__spatialNavigation__) {
+    window.__spatialNavigation__.ensureElementIsVisible(firstItem);
   }
 }
 

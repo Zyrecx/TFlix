@@ -10,8 +10,9 @@
  */
 
 (function () {
-  // The polyfill must not be executed, if it's already enabled via browser engine or browser extensions.
-  if ('navigate' in window) {
+  // Some Tizen WebKit releases expose an unrelated window.navigate function. Treating that as
+  // native CSS spatial navigation disabled all TFlix key handling on those TVs.
+  if (window.__spatialNavigation__) {
     return;
   }
 
@@ -204,6 +205,10 @@
       invalidate: function () { cacheDirty = true; }
     };
 
-    window.navigate = moveFocus;
+    // Keep compatibility for callers on browsers where this name is unused, without replacing
+    // a Tizen/WebKit-provided navigation function.
+    if (typeof window.navigate !== 'function') {
+      window.navigate = moveFocus;
+    }
   }
 })();

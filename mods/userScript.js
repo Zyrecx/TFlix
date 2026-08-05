@@ -5,6 +5,9 @@ import './adsControl.js';
 import './antiDevtool.js';
 import './playerDetection.js';
 import 'whatwg-fetch';
+import { setupRemoteActivation } from './remote-activation.js';
 import './spatial-navigation-polyfill.js';
 import './ui.js';
 import './contentDetector.js';
+
+setupRemoteActivation();
