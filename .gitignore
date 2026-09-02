@@ -1,0 +1,31 @@
+# Node dependencies
+node_modules/
+
+# Build output
+/dist/
+
+# Runtime-installed provider packs & pairing state (never committed —
+# these are fetched per-user via the QR pairing flow, not shipped)
+/service/providers/community/
+/service/data/
+
+# Logs
+npm-debug.log*
+yarn-error.log*
+*.log
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Packaging artifacts
+*.tgz
+
+# Repo-only docs
+NPM-PUBLISHING.md
+MODULES.md
+TFlix-Description.md
+.github/
+
+# Scripts
+*.bat

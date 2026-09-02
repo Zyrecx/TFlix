@@ -1,0 +1,10 @@
+[
+  {
+    "id": "example-embed",
+    "name": "Example Embed Provider",
+    "description": "Template for a simple iframe-embed provider. Replace movieUrl/tvUrl with your own service's embed URL pattern.",
+    "type": "embed",
+    "movieUrl": "https://example.com/embed/movie/{id}",
+    "tvUrl": "https://example.com/embed/tv/{id}/{season}/{episode}"
+  }
+]

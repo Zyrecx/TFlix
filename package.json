@@ -1,0 +1,56 @@
+{
+  "name": "@zyrecx/tflix",
+  "appName": "TFlix",
+  "version": "2.0.0",
+  "description": "TFlix is a 10-foot streaming web app for Samsung Smart TVs running TizenBrew, featuring TMDB discovery and multi-embed streaming.",
+  "packageType": "app",
+  "appPath": "dist/index.html",
+  "main": "dist/index.html",
+  "serviceFile": "service/hlsRelay.js",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "prepublishOnly": "npm run build"
+  },
+  "author": "Zyrex",
+  "keys": [
+    "MediaPlayPause",
+    "MediaPlay",
+    "MediaPause",
+    "MediaStop",
+    "MediaFastForward",
+    "MediaRewind",
+    "MediaTrackNext",
+    "MediaTrackPrevious"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Zyrecx/TFlix"
+  },
+  "bugs": {
+    "url": "https://github.com/Zyrecx/TFlix/issues"
+  },
+  "homepage": "https://github.com/Zyrecx/TFlix#readme",
+  "keywords": [
+    "tizenbrew",
+    "tizen",
+    "samsung",
+    "tv",
+    "tmdb",
+    "streaming"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "lucide-static": "^1.39.0",
+    "vite": "^6.2.0"
+  },
+  "dependencies": {
+    "hls.js": "^1.7.1",
+    "qrcode": "^1.5.4"
+  }
+}
