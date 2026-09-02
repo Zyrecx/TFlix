@@ -383,7 +383,14 @@ class SpatialNavigationManager {
       }
     }
 
-    // Default top-level back behavior: Exit Tizen app if at root
+    // Nothing consumed it — app.js registers a permanent root handler that
+    // shows an exit-confirmation dialog, so this only runs as a fallback if
+    // that handler was never installed.
+    this.exitApp();
+  }
+
+  /** Actually terminates the app — call only after the user has confirmed. */
+  exitApp() {
     if (window.tizen && window.tizen.application) {
       try {
         window.tizen.application.getCurrentApplication().exit();

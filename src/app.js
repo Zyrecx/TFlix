@@ -39,6 +39,14 @@ class TFlixApp {
     nav.init();
     refreshRelayProviders(); // don't block first paint on this
 
+    // Permanent, never-popped root back handler — sits at the bottom of
+    // nav's back-handler stack so it only fires once every screen-level
+    // modal/drawer has handled (or not needed to handle) its own Back press.
+    nav.pushBackHandler(() => {
+      this.showExitConfirm();
+      return true;
+    });
+
     if (!storage.hasSeenSetupTour()) {
       this.openSetupTour();
       return; // loadTab() runs once the tour completes, via onComplete
@@ -52,6 +60,45 @@ class TFlixApp {
       onComplete: () => this.loadTab(this.activeTab)
     });
     modal.render();
+  }
+
+  showExitConfirm() {
+    if (this.exitModalEl) return;
+
+    this.exitModalEl = document.createElement('div');
+    this.exitModalEl.className = 'modal-overlay';
+    this.exitModalEl.innerHTML = `
+      <div class="modal-container" style="max-width: 420px; padding: 36px; text-align: center;">
+        <div style="margin-bottom: 14px; color: #e50914; display: flex; justify-content: center;">${icon('triangle-alert', { size: 40 })}</div>
+        <h2 style="font-size: 20px; font-weight: 800; color: #fff; margin-bottom: 10px;">Exit TFlix?</h2>
+        <p style="color: #a1a1aa; font-size: 14px; margin-bottom: 26px;">Are you sure you want to close the app?</p>
+        <div style="display: flex; gap: 12px; justify-content: center;">
+          <button class="btn btn-secondary focusable primary-focus" id="exit-confirm-cancel" style="padding: 12px 28px;">Cancel</button>
+          <button class="btn btn-primary focusable" id="exit-confirm-ok" style="padding: 12px 28px;">Exit</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(this.exitModalEl);
+
+    const closeHandler = () => {
+      this.closeExitConfirm();
+      return true;
+    };
+    nav.setScope(this.exitModalEl);
+    nav.pushBackHandler(closeHandler);
+    this._exitBackHandler = closeHandler;
+
+    this.exitModalEl.querySelector('#exit-confirm-cancel').addEventListener('click', () => this.closeExitConfirm());
+    this.exitModalEl.querySelector('#exit-confirm-ok').addEventListener('click', () => nav.exitApp());
+  }
+
+  closeExitConfirm() {
+    if (!this.exitModalEl) return;
+    nav.popBackHandler(this._exitBackHandler);
+    nav.clearScope(this.exitModalEl);
+    if (this.exitModalEl.parentNode) this.exitModalEl.parentNode.removeChild(this.exitModalEl);
+    this.exitModalEl = null;
+    this._exitBackHandler = null;
   }
 
   renderShell() {
