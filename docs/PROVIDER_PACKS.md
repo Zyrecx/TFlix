@@ -6,8 +6,8 @@ HLS) provider comes from a *provider pack* — a small JSON manifest plus one
 browsing a catalog (`Settings → Browse Provider Packs`) or scanning a QR
 code (`Settings → Add a Provider Pack → Add via Phone`). This keeps any
 scraping/extraction code for a specific site out of the TFlix repo and npm
-package entirely; see `service/lib/providerPack.js` for the loader and trust
-model.
+package entirely; see the provider-pack section of `service/hlsRelay.js`
+for the loader and trust model.
 
 This doc shows the contract with a fully legal, working example — a public
 Apple test stream, no scraping involved — so you can see the shape and build
@@ -15,18 +15,26 @@ your own pack for a source you have the rights to.
 
 ## 1. The provider file
 
-Each provider is an ES module with a default export shaped like this:
+**Provider files must be plain CommonJS — no `import`/`export`, no dynamic
+`import()`, no optional chaining (`?.`), no nullish coalescing (`??`).** The
+relay loads them with `require()` inside a bare Node `vm` sandbox on the TV
+(that's how TizenBrew's serviceFile mechanism actually works, and it can't
+do ESM syntax or dynamic import at all), and TVs have shipped with Node as
+old as v12.4 — `?.`/`??` need v14+. Async/await, template literals,
+destructuring, and object spread are all fine.
+
+Each provider exports an object shaped like this via `module.exports`:
 
 ```js
 // example-provider.js
-export default {
+module.exports = {
   id: 'example-bipbop',
   name: 'Example (Apple BipBop Test Stream)',
   description: 'Always-available public HLS test stream — for demoing the provider-pack contract only.',
 
   // ctx: { tmdbId, imdbId, title, year, isTv, season, episode }
   // http: { fetchJson(url), fetchText(url), fetchRaw(url) } — plain Node
-  //       requests (no browser Origin header), see service/lib/http.js
+  //       requests (no browser Origin header)
   async resolve(ctx, http) {
     // A real provider would look up `ctx.tmdbId`/`ctx.imdbId` against a
     // streaming source's own API here. This demo just returns the same

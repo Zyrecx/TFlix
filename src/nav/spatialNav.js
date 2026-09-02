@@ -434,7 +434,24 @@ class SpatialNavigationManager {
     const currentRect = this.currentFocusedElement.getBoundingClientRect();
     const candidates = focusables.filter(el => el !== this.currentFocusedElement);
 
+    // UP/DOWN moves within a column (the sidebar's own list, or a card
+    // grid's columns) require actual overlap on the perpendicular axis — a
+    // hard requirement, not just a preference. A plain nearest-by-distance
+    // search (the old behavior) always finds *something* in the direction
+    // pressed, even when nothing is meaningfully aligned — e.g. pressing
+    // DOWN from the last item in the narrow sidebar nav, with nothing below
+    // it in that column, jumped sideways into the content grid because a
+    // card there was "nearest" by raw distance. LEFT/RIGHT gets a softer
+    // preference instead (overlap preferred, but falls back to nearest by
+    // distance): those keystrokes are what cross between the sidebar and
+    // content zones, which often have no true row alignment at all (e.g. a
+    // header gap above the sidebar's top item with no content beside it) —
+    // requiring overlap there would make a legitimate zone-crossing dead-end
+    // instead of just landing on the nearest reasonable target.
+    const requireOverlap = direction === 'UP' || direction === 'DOWN';
+
     let bestCandidate = null;
+    let bestHasOverlap = false;
     let shortestDistance = Infinity;
 
     for (const candidate of candidates) {
@@ -444,16 +461,40 @@ class SpatialNavigationManager {
         continue;
       }
 
+      const hasOverlap = this.getPerpendicularOverlap(currentRect, targetRect, direction) > 0;
+      if (requireOverlap && !hasOverlap) {
+        continue;
+      }
+      if (bestHasOverlap && !hasOverlap) {
+        continue;
+      }
+
       const distance = this.calculateDistance(currentRect, targetRect, direction);
-      if (distance < shortestDistance) {
+      const isBetter = (hasOverlap && !bestHasOverlap) || distance < shortestDistance;
+      if (isBetter) {
         shortestDistance = distance;
         bestCandidate = candidate;
+        bestHasOverlap = hasOverlap;
       }
     }
 
     if (bestCandidate) {
       this.setFocus(bestCandidate);
     }
+  }
+
+  /**
+   * Length of the overlap between the two elements' extents on the axis
+   * perpendicular to `direction` — horizontal extent for UP/DOWN, vertical
+   * extent for LEFT/RIGHT. Zero (or negative, clamped to zero) means the
+   * candidate doesn't share any column (UP/DOWN) or row (LEFT/RIGHT) with
+   * the current element at all.
+   */
+  getPerpendicularOverlap(fromRect, toRect, direction) {
+    if (direction === 'UP' || direction === 'DOWN') {
+      return Math.max(0, Math.min(fromRect.right, toRect.right) - Math.max(fromRect.left, toRect.left));
+    }
+    return Math.max(0, Math.min(fromRect.bottom, toRect.bottom) - Math.max(fromRect.top, toRect.top));
   }
 
   isInDirection(fromRect, toRect, direction) {
