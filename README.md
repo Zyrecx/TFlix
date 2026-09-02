@@ -2,7 +2,7 @@
 
 **TFlix** is a standalone 10-foot streaming web application for Samsung Smart TVs running **TizenBrew**. It's a self-contained TizenBrew *app* (not a mod injected into another site) — modern Netflix-inspired UI, rich metadata and search powered by your own **TMDB** key, seamless D-Pad navigation, and a pluggable multi-provider streaming engine.
 
-> **Note:** The original TFlix was a TizenBrew mod that wrapped [Cineby.at](https://www.cineby.at). That codebase is archived on the `v1-legacy` branch (tag `v1.4.3-legacy`) and is no longer maintained — `main` is the current, standalone app described below.
+> **Note:** The original TFlix was a TizenBrew mod that wrapped [Cineby.at](https://www.cineby.at). That codebase is archived on the [`v1-legacy`](https://github.com/Zyrecx/TFlix/tree/v1-legacy) branch and is no longer maintained — `main` is the current, standalone app described below.
 
 ---
 
