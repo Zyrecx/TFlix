@@ -23,10 +23,17 @@ async function fetchWithTimeout(url, timeoutMs) {
   }
 }
 
-let relayHealthy = null; // cache within a session; a dead relay won't come back without a reload
+// Only a confirmed-reachable relay is cached — a Node serviceFile process
+// can still be starting up when the webview finishes loading and makes its
+// first request (they start independently), so a failure here doesn't mean
+// the relay is actually dead; it may just not be listening *yet*. Caching
+// that as permanent (as an earlier version did) meant one early request
+// racing the relay's own startup would show "not running" for the rest of
+// the session even after the relay came up moments later.
+let relayHealthy = null;
 
 export async function isRelayAvailable() {
-  if (relayHealthy !== null) return relayHealthy;
+  if (relayHealthy === true) return true;
   try {
     const res = await fetchWithTimeout(`${RELAY_BASE}/health`, RELAY_HEALTH_TIMEOUT_MS);
     relayHealthy = res.ok;

@@ -22,6 +22,7 @@ export class SettingsModal {
     this.pairingPollTimer = null;
     this.catalog = null; // array once loaded, or { error } on failure
     this.catalogInstalling = null; // manifestUrl currently installing
+    this.relayStatus = null; // null = checking, true/false after a live (uncached) check
   }
 
   render() {
@@ -33,8 +34,26 @@ export class SettingsModal {
     document.body.appendChild(this.modalEl);
     nav.setScope(this.modalEl);
     nav.pushBackHandler(this.backHandler);
+    this.checkRelay();
 
     return this.modalEl;
+  }
+
+  // A live, uncached health check — deliberately bypasses isRelayAvailable()'s
+  // cache so "Recheck" always reflects the relay's current state instead of
+  // a stale first-load result.
+  async checkRelay() {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2000);
+    try {
+      const res = await fetch(`${RELAY_BASE}/health`, { signal: controller.signal });
+      this.relayStatus = res.ok;
+    } catch {
+      this.relayStatus = false;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (this.modalEl) this.updateView();
   }
 
   updateView() {
@@ -174,6 +193,16 @@ export class SettingsModal {
             Direct HLS providers are resolved by a local relay running on this TV, outside the browser. A "provider pack" adds more sources to it. Only add a pack from someone you trust — it runs code on this device.
           </p>
 
+          <div style="background: #1a1a24; padding: 12px 18px; border-radius: 8px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
+            <div>
+              <div style="font-size: 11px; color: #71717a; text-transform: uppercase; font-weight: 700;">Local Relay</div>
+              <div style="font-size: 14px; font-weight: 600; color: ${this.relayStatus ? '#4ade80' : this.relayStatus === false ? '#ef4444' : '#a1a1aa'};">
+                ${this.relayStatus === null ? 'Checking…' : this.relayStatus ? `${icon('check', { size: 14 })} Reachable (${RELAY_BASE})` : `${icon('triangle-alert', { size: 14 })} Not reachable`}
+              </div>
+            </div>
+            <button class="btn btn-secondary focusable" id="btn-recheck-relay" style="padding: 6px 14px; font-size: 13px;">${icon('refresh-cw', { size: 14 })} Recheck</button>
+          </div>
+
           ${this.renderPackStatus()}
           ${this.renderCatalogUi()}
           <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.08);">
@@ -199,6 +228,8 @@ export class SettingsModal {
           </div>
           <div id="storage-feedback" style="margin-top: 10px; font-size: 14px; color: #4ade80;"></div>
         </div>
+
+        <div style="text-align: center; font-size: 11px; color: #52525b; margin-top: 8px;">TFlix v${typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '?'}</div>
       </div>
     `;
 
@@ -263,6 +294,15 @@ export class SettingsModal {
         storage.clearCustomProviders();
         this.selectedProvider = '';
         this.updateView();
+      });
+    }
+
+    const recheckRelayBtn = this.modalEl.querySelector('#btn-recheck-relay');
+    if (recheckRelayBtn) {
+      recheckRelayBtn.addEventListener('click', () => {
+        this.relayStatus = null;
+        this.updateView();
+        this.checkRelay();
       });
     }
 
