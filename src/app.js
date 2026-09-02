@@ -20,12 +20,17 @@ class TFlixApp {
     this.appEl = document.getElementById('app');
     this.mainContentEl = null;
     this.navBarEl = null;
-    this.isDesktop = !window.tizen;
   }
 
   async init() {
-    // Setup desktop emulation shim & simulator if running in regular browser
-    if (this.isDesktop) {
+    // Desktop emulation shim & remote simulator are dev-tooling only. Gated
+    // on Vite's build-time DEV flag rather than `!window.tizen` — TizenBrew
+    // doesn't expose the `tizen` namespace to dynamically-loaded npm modules,
+    // so that runtime check was true on the real TV too, shipping the
+    // simulator there. import.meta.env.DEV is always false in a production
+    // build (`vite build`), regardless of the runtime environment, and lets
+    // Vite tree-shake this code out of the shipped bundle entirely.
+    if (import.meta.env.DEV) {
       setupTizenShim();
       setupTvRemoteSimulator();
     }
