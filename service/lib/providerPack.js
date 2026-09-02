@@ -15,12 +15,16 @@
 
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from 'fs';
 import path from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import os from 'os';
+import { pathToFileURL } from 'url';
 import { fetchJson, fetchText } from './http.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const COMMUNITY_DIR = path.join(__dirname, '..', 'providers', 'community');
-const CONFIG_PATH = path.join(__dirname, '..', 'data', 'providerPack.json');
+// Must match DATA_DIR in ../hlsRelay.js — see the comment there for why this
+// isn't relative to __dirname (the package's own install location, which
+// TizenBrew appears to serve read-only).
+const DATA_DIR = path.join(os.tmpdir(), 'tflix-relay');
+const COMMUNITY_DIR = path.join(DATA_DIR, 'providers', 'community');
+const CONFIG_PATH = path.join(DATA_DIR, 'data', 'providerPack.json');
 
 function ensureDirs() {
   mkdirSync(COMMUNITY_DIR, { recursive: true });

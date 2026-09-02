@@ -41,6 +41,13 @@ const providerHttp = { fetchRaw, fetchJson, fetchText };
 
 const PORT = 47993;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Installed provider packs must live outside the package's own install
+// directory — TizenBrew appears to serve npm modules from a location that
+// isn't writable, so writing here (as an earlier version did) threw
+// synchronously during startup and silently killed the whole relay before
+// server.listen() ever ran. os.tmpdir() is always writable. Must match the
+// same path in lib/providerPack.js.
+const DATA_DIR = path.join(os.tmpdir(), 'tflix-relay');
 
 function lanAddress() {
   const ifaces = os.networkInterfaces();
@@ -80,8 +87,14 @@ async function loadProvidersFrom(dir) {
 
 async function loadAllProviders() {
   const builtinDir = path.join(__dirname, 'providers');
-  const communityDir = path.join(__dirname, 'providers', 'community');
-  mkdirSync(communityDir, { recursive: true });
+  const communityDir = path.join(DATA_DIR, 'providers', 'community');
+  try {
+    mkdirSync(communityDir, { recursive: true });
+  } catch (e) {
+    // Degrade to "no community providers" rather than take the whole relay
+    // down — this only blocks pack installs, not builtin providers/playback.
+    console.error('[hlsRelay] Could not create community providers dir:', e.message);
+  }
 
   const [builtin, community] = await Promise.all([
     loadProvidersFrom(builtinDir),
@@ -209,6 +222,11 @@ async function main() {
       res.end();
       return;
     }
+
+    // A synchronous throw anywhere below (e.g. a filesystem error reading
+    // pack config) would otherwise become an unhandled rejection and take
+    // the whole relay process down for every subsequent request too.
+    try {
 
     let reqUrl;
     try {
@@ -392,6 +410,15 @@ async function main() {
 
     res.statusCode = 404;
     res.end('not found');
+
+    } catch (e) {
+      console.error('[hlsRelay] Unhandled request error:', e && e.stack ? e.stack : e);
+      if (!res.headersSent) {
+        res.statusCode = 500;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: 'Internal relay error' }));
+      }
+    }
   });
 
   server.on('error', (e) => {
@@ -404,4 +431,6 @@ async function main() {
   });
 }
 
-main();
+main().catch((e) => {
+  console.error('[hlsRelay] Fatal startup error:', e && e.stack ? e.stack : e);
+});
