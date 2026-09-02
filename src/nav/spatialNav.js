@@ -172,10 +172,16 @@ class SpatialNavigationManager {
 
     this.currentFocusedElement = element;
     element.classList.add('tflix-focused');
-    try {
-      element.focus({ preventScroll: true });
-    } catch (e) {
-      element.focus();
+    // Giving a text input real DOM focus pops the TV's on-screen keyboard
+    // immediately — spatial navigation should only highlight it and wait for
+    // an explicit OK press (see handleKeyDown's Enter branch) before opening
+    // the keyboard.
+    if (!this.isTextInput(element)) {
+      try {
+        element.focus({ preventScroll: true });
+      } catch (e) {
+        element.focus();
+      }
     }
 
     if (scroll) {
@@ -248,8 +254,20 @@ class SpatialNavigationManager {
     if (keyCode === TIZEN_KEYS.ENTER || key === 'Enter') {
       if (this.currentFocusedElement && document.body.contains(this.currentFocusedElement)) {
         if (this.isTextInput(this.currentFocusedElement)) {
-          // If already focused on text input, trigger change/submit or click closest action
-          this.currentFocusedElement.dispatchEvent(new Event('change', { bubbles: true }));
+          e.preventDefault();
+          if (document.activeElement !== this.currentFocusedElement) {
+            // First OK press on a spatially-highlighted-but-not-yet-real-
+            // focused input: give it real focus now, which is what opens
+            // the on-screen keyboard.
+            try {
+              this.currentFocusedElement.focus({ preventScroll: true });
+            } catch (err) {
+              this.currentFocusedElement.focus();
+            }
+          } else {
+            // Already focused (keyboard open) — treat OK as submit/confirm.
+            this.currentFocusedElement.dispatchEvent(new Event('change', { bubbles: true }));
+          }
           return;
         }
         e.preventDefault();
