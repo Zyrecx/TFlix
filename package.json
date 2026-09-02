@@ -1,7 +1,7 @@
 {
   "name": "@zyrecx/tflix",
   "appName": "TFlix",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "TFlix is a 10-foot streaming web app for Samsung Smart TVs running TizenBrew, featuring TMDB discovery and multi-embed streaming.",
   "packageType": "app",
   "appPath": "dist/index.html",
