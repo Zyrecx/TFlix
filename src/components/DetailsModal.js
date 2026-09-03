@@ -2,6 +2,15 @@ import { tmdb } from '../api/tmdb.js';
 import { storage } from '../store/storage.js';
 import { nav } from '../nav/spatialNav.js';
 import { icon } from '../ui/icons.js';
+import { openRangeMenu } from '../ui/rangeMenu.js';
+import { getProviders } from '../api/providers.js';
+import { listAvailableEpisodes } from '../api/streamScraper.js';
+
+// Shows with very large seasons (e.g. daily talk shows with 1000+ episodes)
+// are chunked into fixed-size ranges so the carousel never has to render
+// (or the remote never has to D-pad through) more than this many cards at
+// once — mirrors how TMDB/most trackers paginate long seasons.
+const EP_CHUNK_SIZE = 25;
 
 export class DetailsModal {
   constructor({ item, onPlay, onClose }) {
@@ -10,9 +19,37 @@ export class DetailsModal {
     this.onClose = onClose;
     this.details = null;
     this.selectedSeason = 1;
-    this.episodes = [];
+    this.episodes = []; // full episode list for the selected season
+    this.ranges = null; // chunked ranges for the selected season, or null if not chunked
+    this.selectedRangeStart = 1;
     this.modalEl = null;
     this.backHandler = this.close.bind(this);
+    // Episode-availability badges (see docs/PROVIDER_PACKS.md's "Optional
+    // capabilities") — null means "unknown/don't show badges", a Set means
+    // "known, badge anything not in it". Only ever reflects the default
+    // provider, since availability is provider-specific — see loadAvailability.
+    this.availableEpisodes = null;
+    this.availabilityProviderId = null;
+  }
+
+  // Fire-and-forget: badges are a bonus, never block or slow down browsing.
+  // listAvailableEpisodes already refuses to do anything (returns null, no
+  // network call) unless this exact provider+show has an already-confirmed
+  // identity — see its own comment for why that's required for safety.
+  async loadAvailability() {
+    const providerId = storage.getDefaultProvider();
+    if (!providerId) return;
+    const provider = getProviders().find(p => p.id === providerId);
+    if (!provider || !provider.supportsAvailability) return;
+
+    const episodes = await listAvailableEpisodes(providerId, this.details.id);
+    if (!episodes) return;
+
+    this.availableEpisodes = new Set(episodes);
+    this.availabilityProviderId = providerId;
+    if (this.modalEl && document.body.contains(this.modalEl)) {
+      this.renderEpisodeCards();
+    }
   }
 
   async render() {
@@ -20,7 +57,7 @@ export class DetailsModal {
     this.modalEl.className = 'modal-overlay';
 
     const mediaType = this.item.media_type || this.item.mediaType || (this.item.first_air_date ? 'tv' : 'movie');
-    
+
     // Show skeleton while loading full details
     this.modalEl.innerHTML = `
       <div class="modal-container">
@@ -37,6 +74,7 @@ export class DetailsModal {
     try {
       this.details = await tmdb.getDetails(mediaType, this.item.id);
       this.updateContent();
+      if (mediaType === 'tv') this.loadAvailability();
     } catch (err) {
       console.error('Failed to load details:', err);
       this.modalEl.innerHTML = `
@@ -78,10 +116,11 @@ export class DetailsModal {
           <div class="season-tabs" id="season-tabs-container">
             ${validSeasons.map(s => `
               <button class="season-btn focusable ${s.season_number === this.selectedSeason ? 'active' : ''}" data-season="${s.season_number}">
-                ${s.name || `Season ${s.season_number}`}
+                ${s.name || `Season ${s.season_number}`}${s.episode_count ? ` <span class="season-ep-count">(${s.episode_count})</span>` : ''}
               </button>
             `).join('')}
           </div>
+          <button class="range-picker-btn focusable" id="details-range-btn" hidden></button>
           <div class="episodes-grid" id="episodes-container">
             <div style="color: #71717a; padding: 20px;">Loading episodes...</div>
           </div>
@@ -166,15 +205,42 @@ export class DetailsModal {
           this.loadSeasonEpisodes(sNum);
         });
       });
-      this.loadSeasonEpisodes(this.selectedSeason);
+
+      const rangeBtn = this.modalEl.querySelector('#details-range-btn');
+      if (rangeBtn) {
+        rangeBtn.addEventListener('click', () => this.openRangePicker());
+      }
+
+      this.loadSeasonEpisodes(this.selectedSeason, resumeSeason === this.selectedSeason ? resumeEpisode : null);
     }
 
     nav.setScope(this.modalEl);
   }
 
-  async loadSeasonEpisodes(seasonNumber) {
+  /**
+   * Splits episodes into fixed-size ranges (e.g. "1-25", "26-50"), returning
+   * null when the season is short enough that chunking would just be noise.
+   */
+  computeRanges(episodes) {
+    if (episodes.length <= EP_CHUNK_SIZE) return null;
+    const nums = episodes.map(e => e.episode_number);
+    const min = Math.min(...nums);
+    const max = Math.max(...nums);
+    const ranges = [];
+    for (let start = min; start <= max; start += EP_CHUNK_SIZE) {
+      ranges.push({ start, end: Math.min(start + EP_CHUNK_SIZE - 1, max) });
+    }
+    return ranges;
+  }
+
+  rangeContaining(episodeNumber) {
+    if (!this.ranges) return null;
+    return this.ranges.find(r => episodeNumber >= r.start && episodeNumber <= r.end) || this.ranges[0];
+  }
+
+  async loadSeasonEpisodes(seasonNumber, focusEpisode = null) {
     this.selectedSeason = seasonNumber;
-    
+
     // Update active tab button
     const seasonButtons = this.modalEl.querySelectorAll('.season-btn');
     seasonButtons.forEach(btn => {
@@ -192,46 +258,118 @@ export class DetailsModal {
         return;
       }
 
-      epContainer.innerHTML = '';
-      this.episodes.forEach(ep => {
-        const epCard = document.createElement('div');
-        epCard.className = 'episode-card focusable';
-        epCard.setAttribute('tabindex', '0');
+      this.ranges = this.computeRanges(this.episodes);
+      const targetEpisode = focusEpisode !== null ? focusEpisode : this.episodes[0].episode_number;
+      const initialRange = this.rangeContaining(targetEpisode);
+      this.selectedRangeStart = initialRange ? initialRange.start : this.episodes[0].episode_number;
 
-        const stillUrl = ep.still_path ? tmdb.getImageUrl(ep.still_path, 'w500') : tmdb.getImageUrl(this.details.backdrop_path, 'w500');
-
-        epCard.innerHTML = `
-          <div class="episode-thumb">
-            <img src="${stillUrl}" alt="Episode ${ep.episode_number}" loading="lazy" />
-            <div class="episode-number">EP ${ep.episode_number}</div>
-          </div>
-          <div class="episode-info">
-            <div class="episode-title">${ep.name || `Episode ${ep.episode_number}`}</div>
-            <div class="episode-desc">${ep.overview || 'No episode description.'}</div>
-          </div>
-        `;
-
-        epCard.addEventListener('click', () => {
-          const mediaToPlay = {
-            id: this.details.id,
-            media_type: 'tv',
-            mediaType: 'tv',
-            title: `${this.details.name || this.details.title} - S${seasonNumber}E${ep.episode_number}`,
-            season: seasonNumber,
-            episode: ep.episode_number,
-            poster_path: this.details.poster_path,
-            backdrop_path: this.details.backdrop_path,
-            vote_average: this.details.vote_average
-          };
-          this.close();
-          this.onPlay(mediaToPlay);
-        });
-
-        epContainer.appendChild(epCard);
-      });
+      this.updateRangeButton();
+      this.renderEpisodeCards(focusEpisode);
     } catch (err) {
       console.error('Failed to load season episodes:', err);
       epContainer.innerHTML = `<div style="color: #e50914; padding: 20px;">Failed to load episodes: ${err.message}</div>`;
+    }
+  }
+
+  updateRangeButton() {
+    const rangeBtn = this.modalEl.querySelector('#details-range-btn');
+    if (!rangeBtn) return;
+
+    // Only a long, chunked season needs a range picker at all — a normal
+    // ~20-episode season is just as fast to D-pad through directly.
+    if (!this.ranges) {
+      rangeBtn.hidden = true;
+      return;
+    }
+
+    const current = this.rangeContaining(this.selectedRangeStart);
+    rangeBtn.hidden = false;
+    rangeBtn.innerHTML = `Episodes ${current.start}–${current.end} ${icon('chevron-down', { size: 14 })}`;
+  }
+
+  openRangePicker() {
+    if (!this.ranges) return;
+    openRangeMenu({
+      ranges: this.ranges,
+      currentStart: this.selectedRangeStart,
+      onSelect: (start) => {
+        this.selectedRangeStart = start;
+        this.updateRangeButton();
+        this.renderEpisodeCards();
+      }
+    });
+  }
+
+  renderEpisodeCards(focusEpisode = null) {
+    const epContainer = this.modalEl.querySelector('#episodes-container');
+    if (!epContainer) return;
+
+    const currentRange = this.rangeContaining(this.selectedRangeStart);
+    const visibleEpisodes = currentRange
+      ? this.episodes.filter(ep => ep.episode_number >= currentRange.start && ep.episode_number <= currentRange.end)
+      : this.episodes;
+
+    const seasonNumber = this.selectedSeason;
+
+    epContainer.innerHTML = '';
+    visibleEpisodes.forEach(ep => {
+      const epCard = document.createElement('div');
+      epCard.className = 'episode-card focusable';
+      epCard.setAttribute('tabindex', '0');
+      epCard.dataset.episodeNumber = ep.episode_number;
+      // Escape hatch for spatial nav: from anywhere in this horizontally
+      // scrolling row, UP always returns to the range picker button (if
+      // chunked), else the active season tab — otherwise a card in the
+      // middle of a wide row can have no header control directly above it
+      // and UP does nothing (see spatialNav.js's data-nav-up handling).
+      epCard.dataset.navUp = this.ranges ? '#details-range-btn' : '.season-btn.active';
+
+      const stillUrl = ep.still_path ? tmdb.getImageUrl(ep.still_path, 'w500') : tmdb.getImageUrl(this.details.backdrop_path, 'w500');
+
+      // Only render a badge once availability is actually known (see
+      // loadAvailability) — absence of data means "unknown", never "missing".
+      const isUnavailable = this.availableEpisodes && !this.availableEpisodes.has(ep.episode_number);
+      if (isUnavailable) epCard.classList.add('episode-unavailable');
+      const providerName = isUnavailable
+        ? (getProviders().find(p => p.id === this.availabilityProviderId) || {}).name || this.availabilityProviderId
+        : '';
+
+      epCard.innerHTML = `
+        <div class="episode-thumb">
+          <img src="${stillUrl}" alt="Episode ${ep.episode_number}" loading="lazy" />
+          <div class="episode-number">EP ${ep.episode_number}</div>
+          ${isUnavailable ? `<div class="episode-unavailable-badge" title="Not found on ${providerName}">${icon('flag', { size: 12 })} Not on ${providerName}</div>` : ''}
+        </div>
+        <div class="episode-info">
+          <div class="episode-title">${ep.name || `Episode ${ep.episode_number}`}</div>
+          <div class="episode-desc">${ep.overview || 'No episode description.'}</div>
+        </div>
+      `;
+
+      epCard.addEventListener('click', () => {
+        const mediaToPlay = {
+          id: this.details.id,
+          media_type: 'tv',
+          mediaType: 'tv',
+          title: `${this.details.name || this.details.title} - S${seasonNumber}E${ep.episode_number}`,
+          season: seasonNumber,
+          episode: ep.episode_number,
+          poster_path: this.details.poster_path,
+          backdrop_path: this.details.backdrop_path,
+          vote_average: this.details.vote_average
+        };
+        this.close();
+        this.onPlay(mediaToPlay);
+      });
+
+      epContainer.appendChild(epCard);
+    });
+
+    if (focusEpisode !== null) {
+      setTimeout(() => {
+        const target = epContainer.querySelector(`.episode-card[data-episode-number="${focusEpisode}"]`);
+        if (target) nav.setFocus(target);
+      }, 50);
     }
   }
 

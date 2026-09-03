@@ -431,6 +431,26 @@ class SpatialNavigationManager {
       return;
     }
 
+    // Opt-in escape hatch: an element can declare `data-nav-up="<selector>"`
+    // (and -down/-left/-right) to jump straight to a specific control for
+    // that direction instead of the overlap-based search below — e.g. a
+    // horizontally-scrolling episode carousel routing UP back to the season
+    // tabs even when the focused card happens to share no column with any
+    // header control (the overlap requirement would otherwise strand it,
+    // since a wide carousel commonly has cards with no header element above
+    // them at all). Falls through to normal spatial search if the selector
+    // doesn't resolve to a currently-focusable element.
+    const overrideKey = 'nav' + direction.charAt(0) + direction.slice(1).toLowerCase();
+    const overrideSelector = this.currentFocusedElement.dataset[overrideKey];
+    if (overrideSelector) {
+      const root = this.activeScope || document;
+      const overrideEl = root.querySelector(overrideSelector);
+      if (overrideEl && focusables.includes(overrideEl)) {
+        this.setFocus(overrideEl);
+        return;
+      }
+    }
+
     const currentRect = this.currentFocusedElement.getBoundingClientRect();
     const candidates = focusables.filter(el => el !== this.currentFocusedElement);
 

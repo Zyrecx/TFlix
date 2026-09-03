@@ -32,9 +32,11 @@ module.exports = {
   name: 'Example (Apple BipBop Test Stream)',
   description: 'Always-available public HLS test stream — for demoing the provider-pack contract only.',
 
-  // ctx: { tmdbId, imdbId, title, year, isTv, season, episode }
-  // http: { fetchJson(url), fetchText(url), fetchRaw(url) } — plain Node
-  //       requests (no browser Origin header)
+  // ctx: { tmdbId, imdbId, title, year, isTv, season, episode, confirmedShowId }
+  // http: { fetchJson(url), fetchText(url), fetchRaw(url, opts?) } — plain
+  //       Node requests (no browser Origin header). `opts` on fetchRaw is
+  //       either a plain headers object (GET, back-compat) or
+  //       { method, headers, body } for a POST/PUT with a body.
   async resolve(ctx, http) {
     // A real provider would look up `ctx.tmdbId`/`ctx.imdbId` against a
     // streaming source's own API here. This demo just returns the same
@@ -48,8 +50,108 @@ module.exports = {
 };
 ```
 
-`resolve()` must return `{ streamUrl, subtitles?, providerName? }` or throw —
-a thrown error triggers TFlix's automatic fallback to the next provider.
+`resolve()` must return one of three shapes, or throw — a thrown error
+triggers TFlix's automatic fallback to the next provider:
+
+1. **`{ streamUrl, subtitles?, providerName?, referer? }`** — a raw HLS/MP4
+   URL. Played natively (native controls, resume, subtitle rendering).
+   Prefer this when the source is extractable without excessive fragility.
+   Set `referer` (the page the stream URL was extracted from) when the CDN
+   enforces hotlink protection — the relay forwards it as the `Referer`
+   header on the master playlist *and* every sub-playlist/segment fetch it
+   proxies for that stream. Without it, some hosts (confirmed live:
+   lulustream/luluvdo's `tnmr.org` CDN) 403 every request, including ones
+   with no Referer at all.
+
+2. **`{ embedUrl, providerName? }`** — a URL to iframe as-is instead of a raw
+   stream. Use this when raw extraction would mean chasing an ad-injected or
+   frequently-changing wrapper chain (see the Stardima case study below) —
+   trading native player features for reliability. `embedUrl` bypasses
+   TFlix's HLS-playlist rewriting proxy entirely, since it's an HTML page,
+   not a playlist.
+
+3. **`{ needsConfirmation: true, candidates: [{ id, label, year? }], providerName? }`**
+   — the title search was ambiguous and you don't want to guess. TFlix shows
+   the user a picker and, once they choose, calls `resolve()` again with
+   `ctx.confirmedShowId` set to the chosen candidate's `id`. **Skip search
+   entirely when `ctx.confirmedShowId` is set** — go straight to that show.
+   TFlix caches the choice per (provider, TMDB id), so this fires once per
+   show, not once per episode — design your `id` values to be stable across
+   calls (e.g. the source site's own internal show id).
+
+### Optional capabilities
+
+These exist for packs shaped like the Stardima case study below — a source
+with its own independent, fuzzily-matched, and genuinely incomplete catalog.
+A provider keyed directly off `ctx.tmdbId`/`ctx.imdbId` (one request, one
+definite yes/no answer) has neither problem and should leave both unset.
+
+- **`fuzzyMatch: true`** — this pack has to guess which of its own catalog
+  entries corresponds to the requested title (i.e. it uses the
+  `needsConfirmation` flow above). TFlix uses this to show a "wrong match?"
+  control during playback, letting the user correct — or explicitly
+  ratify — an auto-accepted single-candidate match after the fact, via
+  `ctx.forceConfirm: true` (see below), rather than prompting on every new
+  title just in case one is wrong.
+
+- **`ctx.forceConfirm`** — when true, `resolve()` must return
+  `needsConfirmation` (with candidates) even if there's only one match, or
+  a cached `ctx.confirmedShowId` would otherwise apply — the "wrong match?"
+  control sets this to force the picker to reappear on demand. Auto-accepting
+  a single search result without ever offering this is how a wrong match
+  (e.g. two same-franchise titles the site's search doesn't distinguish
+  well) can go unnoticed indefinitely.
+
+- **`supportsAvailability: true` + `async listEpisodes(ctx, http)`** — this
+  pack's catalog is genuinely incomplete (not every episode is available),
+  so TFlix can show a small "not on \[Provider\]" badge in the episode grid.
+  `listEpisodes` receives only `{ confirmedShowId }` (TFlix never calls it
+  with an unconfirmed guess — a badge based on a wrong identity match is
+  worse than no badge) and returns `{ episodes: [absoluteEpisodeNumber, ...] }`
+  covering every season/bucket your source might split the catalog into.
+  Keep this **season/batch-grained**, not per-episode — fetch each of your
+  source's own listing endpoints once and return everything they contain,
+  rather than one request per episode number.
+
+### Case study: a source with no TMDB/IMDb id mapping
+
+Some sites (Arabic dub aggregators are a common example) have no external-id
+lookup at all — only a text search keyed by their own internal ids, and a
+per-title server list that itself points through ad-laden wrapper domains
+before reaching the actual host. A resolver for a source like that typically:
+
+1. Searches by `ctx.title` (+ `ctx.year` for movies) against the site's own
+   search endpoint.
+2. If `ctx.confirmedShowId` is set, skips straight to step 4 using it in
+   place of a fresh search result.
+3. If the search is ambiguous (multiple plausible titles, or none — don't
+   guess), returns `{ needsConfirmation, candidates }`.
+4. Loads the matched title's episode/server list and picks a server.
+5. If that server is itself a redirect-wrapper domain (ad monetization
+   layers are common), look for the *real* destination already sitting in
+   that wrapper's own query string (e.g. `?id=<encoded real URL>`) rather
+   than following the redirect — it's usually right there, and skipping it
+   avoids the ad chain entirely.
+6. Extracts the actual `.m3u8`/`.mp4` from that final host's page. Some
+   hosts use a simple reversible word-substitution obfuscation on their
+   player config (a giant `'a|b|c|...'.split('|')` dictionary swap) rather
+   than real packed/eval'd JS — check for that pattern before assuming you
+   need a full unpacker.
+7. On failure at any step (episode not found, no server worked), **throw**
+   rather than resolve the wrong episode — TFlix falls back to the next
+   provider automatically.
+
+### A note on episode numbering
+
+`ctx.season`/`ctx.episode` are TMDB's numbers, which for most shows means
+per-season numbering. Some sources (again, common for long-running anime dub
+sites) number episodes as one continuous run instead. Before writing any
+conversion logic, check what TMDB's own canonical season structure for the
+show actually is — some long-running series are modeled by TMDB as a single
+season already, in which case `ctx.episode` already *is* the absolute number
+and no conversion is needed. Don't build a season-length-sum conversion
+speculatively; only add it once you've confirmed a specific show actually
+needs one.
 
 ## 2. The manifest
 

@@ -13,7 +13,7 @@ import { icon } from '../ui/icons.js';
 import { openServerMenu } from '../ui/serverMenu.js';
 
 export class VideoPlayer {
-  constructor({ media, streamUrl, providerId, subtitles = [], onNextEpisode, onClose, onSwitchToEmbed, onSwitchProvider, onFallback }) {
+  constructor({ media, streamUrl, providerId, subtitles = [], onNextEpisode, onClose, onSwitchToEmbed, onSwitchProvider, onFallback, onWrongMatch }) {
     this.media = media; // { id, media_type, title, season, episode, ... }
     this.streamUrl = streamUrl;
     this.providerId = providerId || '';
@@ -23,6 +23,7 @@ export class VideoPlayer {
     this.onSwitchToEmbed = onSwitchToEmbed;
     this.onSwitchProvider = onSwitchProvider;
     this.onFallback = onFallback;
+    this.onWrongMatch = onWrongMatch;
     this.providers = getProviders();
 
     this.containerEl = null;
@@ -92,6 +93,11 @@ export class VideoPlayer {
             <button class="btn btn-secondary btn-sm focusable" id="btn-native-server-select" title="Change Server">
               ${icon('server', { size: 16 })}
             </button>
+            ${this.currentProviderSupportsFuzzyMatch() ? `
+              <button class="btn btn-secondary btn-sm focusable" id="btn-wrong-match" title="Wrong show or movie? Fix it">
+                ${icon('flag', { size: 16 })}
+              </button>
+            ` : ''}
             <button class="btn btn-secondary btn-sm focusable" id="btn-hud-close" title="Exit Player">
               ${icon('x', { size: 16 })}
             </button>
@@ -213,6 +219,15 @@ export class VideoPlayer {
   getProviderName() {
     const p = (this.providers || []).find(x => x.id === this.providerId);
     return p ? p.name : this.providerId || 'Direct Stream';
+  }
+
+  // Only providers that have to guess an identity match (see
+  // docs/PROVIDER_PACKS.md's "Optional capabilities" — fuzzyMatch) can ever
+  // have a wrong one to fix; a tmdbId/imdbId-keyed direct provider has
+  // nothing this control would do.
+  currentProviderSupportsFuzzyMatch() {
+    const p = (this.providers || []).find(x => x.id === this.providerId);
+    return Boolean(p && p.fuzzyMatch);
   }
 
   triggerFallback(reason = 'Stream offline') {
@@ -422,6 +437,13 @@ export class VideoPlayer {
             if (this.containerEl) nav.setScope(this.containerEl);
           }
         });
+      });
+    }
+
+    const wrongMatchBtn = this.containerEl.querySelector('#btn-wrong-match');
+    if (wrongMatchBtn) {
+      wrongMatchBtn.addEventListener('click', () => {
+        if (this.onWrongMatch) this.onWrongMatch();
       });
     }
 
@@ -891,6 +913,7 @@ export class VideoPlayer {
 
     this.activeDrawer = new EpisodeDrawer({
       media: this.media,
+      providerId: this.providerId,
       currentSeason: this.media.season || 1,
       currentEpisode: this.media.episode || 1,
       onSelectEpisode: (newMedia) => {

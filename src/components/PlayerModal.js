@@ -54,7 +54,7 @@ export class PlayerModal {
     return this.playerEl;
   }
 
-  async renderNativePlayer(directStreamUrl) {
+  async renderNativePlayer(directStreamUrl, forceConfirm = false) {
     const isTv = this.media.media_type === 'tv' || this.media.mediaType === 'tv';
     const season = this.media.season || 1;
     const episode = this.media.episode || 1;
@@ -71,7 +71,25 @@ export class PlayerModal {
       let subtitles = [];
 
       if (!resolvedStreamUrl) {
-        const resolved = await resolveDirectStream(this.currentProviderId, this.media, season, episode);
+        const resolved = await resolveDirectStream(this.currentProviderId, this.media, season, episode, null, forceConfirm);
+
+        if (resolved && resolved.needsConfirmation) {
+          this.renderConfirmMatchView(resolved.candidates, resolved.providerName);
+          return;
+        }
+
+        if (resolved && resolved.embedUrl) {
+          if (this.playerEl && this.playerEl.parentNode) {
+            nav.clearScope(this.playerEl);
+            this.playerEl.parentNode.removeChild(this.playerEl);
+            this.playerEl = null;
+          }
+          this.playerEl = document.createElement('div');
+          this.playerEl.className = 'player-screen';
+          this.renderActiveEmbedPlayer('', resolved.embedUrl);
+          return;
+        }
+
         if (resolved && resolved.streamUrl) {
           resolvedStreamUrl = resolved.streamUrl;
           subtitles = resolved.subtitles || [];
@@ -107,6 +125,9 @@ export class PlayerModal {
         },
         onFallback: (failedId, reason) => {
           this.handleFallback(failedId, reason);
+        },
+        onWrongMatch: () => {
+          this.reconfirmMatch();
         }
       });
 
@@ -144,6 +165,60 @@ export class PlayerModal {
     const cancelBtn = this.playerEl.querySelector('#btn-cancel-connecting');
     if (cancelBtn) {
       cancelBtn.addEventListener('click', () => this.close());
+    }
+  }
+
+  // Shown when a "direct" provider's resolve() can't confidently match the
+  // title (see docs/PROVIDER_PACKS.md — the `needsConfirmation` outcome).
+  // The choice is cached via storage.setConfirmedShowId, keyed by provider +
+  // TMDB id, so this only ever fires once per show — not per episode.
+  renderConfirmMatchView(candidates = [], providerName = '') {
+    if (this.playerEl && this.playerEl.parentNode) {
+      this.playerEl.parentNode.removeChild(this.playerEl);
+    }
+
+    this.playerEl = document.createElement('div');
+    this.playerEl.className = 'player-screen';
+
+    const items = candidates.slice(0, 8).map((c, i) => `
+      <button class="btn btn-secondary focusable${i === 0 ? ' primary-focus' : ''}" data-candidate-id="${c.id}"
+        style="display:block; width:100%; text-align:right; padding:14px 18px; font-size:15px; margin-bottom:10px;">
+        ${c.label || c.title || c.id}${c.year ? ` <span style="color:#a1a1aa;">(${c.year})</span>` : ''}
+      </button>
+    `).join('');
+
+    this.playerEl.innerHTML = `
+      <div class="player-hud" style="opacity: 1; pointer-events: all; transform: none; background: rgba(10,10,15,0.97); position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1000;">
+        <div style="max-width: 560px; width: 90%; text-align: center; padding: 40px; background: #181824; border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.9);">
+          <h2 style="color: #fff; font-size: 20px; font-weight: 800; margin-bottom: 8px;">Confirm the match on ${providerName || 'this server'}</h2>
+          <p style="color: #a1a1aa; font-size: 14px; line-height: 1.5; margin-bottom: 20px;">
+            Couldn't confidently match this title automatically. Pick the right one below — you'll only be asked once for this show.
+          </p>
+          <div style="text-align: right; margin-bottom: 8px;">
+            ${items || '<p style="color:#a1a1aa;">No matches found.</p>'}
+          </div>
+          <button class="btn btn-secondary focusable" id="btn-confirm-skip" style="padding: 10px 24px; font-size: 14px; margin-top: 8px;">
+            ${icon('x')} None of these — try next server
+          </button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(this.playerEl);
+    nav.setScope(this.playerEl);
+    nav.pushBackHandler(this.backHandler);
+
+    this.playerEl.querySelectorAll('[data-candidate-id]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const showId = btn.getAttribute('data-candidate-id');
+        storage.setConfirmedShowId(this.currentProviderId, String(this.media.id), showId);
+        this.renderNativePlayer();
+      });
+    });
+
+    const skipBtn = this.playerEl.querySelector('#btn-confirm-skip');
+    if (skipBtn) {
+      skipBtn.addEventListener('click', () => this.handleFallback(this.currentProviderId, 'No confirmed match'));
     }
   }
 
@@ -298,7 +373,7 @@ export class PlayerModal {
     });
   }
 
-  renderActiveEmbedPlayer(fallbackReason = '') {
+  renderActiveEmbedPlayer(fallbackReason = '', overrideUrl = null) {
     const isTv = this.media.media_type === 'tv' || this.media.mediaType === 'tv';
     const season = this.media.season || 1;
     const episode = this.media.episode || 1;
@@ -316,7 +391,10 @@ export class PlayerModal {
     const saved = storage.getProgress(this.media.id, season, episode);
     const startAt = saved && saved.currentTime > 15 ? saved.currentTime : 0;
 
-    const embedUrl = getEmbedUrl(this.currentProviderId, isTv ? 'tv' : 'movie', this.media.id, season, episode, startAt);
+    // overrideUrl: a "direct" provider that resolved to { embedUrl } instead
+    // of a raw stream — the URL is already final, skip the {id} templating
+    // that getEmbedUrl() does for classic embed-type providers.
+    const embedUrl = overrideUrl || getEmbedUrl(this.currentProviderId, isTv ? 'tv' : 'movie', this.media.id, season, episode, startAt);
 
     this.hasPlaybackStarted = false;
     clearTimeout(this.embedTimeoutTimer);
@@ -558,6 +636,26 @@ export class PlayerModal {
     this.playerEl = document.createElement('div');
     this.playerEl.className = 'player-screen';
     this.renderActiveEmbedPlayer();
+  }
+
+  // Lets the user correct (or explicitly ratify) a `fuzzyMatch` provider's
+  // auto-accepted single-candidate match after the fact — see the
+  // forceConfirm note on resolveDirectStream. Re-running with forceConfirm
+  // always surfaces renderConfirmMatchView, even for one candidate, so
+  // picking it there is what actually caches it via setConfirmedShowId
+  // (auto-accepted matches are deliberately never cached on their own —
+  // see docs/PROVIDER_PACKS.md's "Optional capabilities").
+  reconfirmMatch() {
+    if (this.activePlayerInstance) {
+      this.activePlayerInstance.close();
+      this.activePlayerInstance = null;
+    }
+    if (this.playerEl && this.playerEl.parentNode) {
+      nav.clearScope(this.playerEl);
+      this.playerEl.parentNode.removeChild(this.playerEl);
+      this.playerEl = null;
+    }
+    this.renderNativePlayer(null, true);
   }
 
   wakeHud() {

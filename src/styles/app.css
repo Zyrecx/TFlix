@@ -444,6 +444,50 @@ html, body {
   border-color: var(--color-primary);
 }
 
+/* TV-safe episode-range picker (replaces the crowded flat row of range tabs) */
+.range-menu {
+  padding: 28px;
+  max-width: 620px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.range-menu-title {
+  font-size: 18px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.range-menu-list {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  overflow-y: auto;
+  /* Wide enough to fit the focused item's scale(1.06) + box-shadow (see the
+     global .tflix-focused rule) without this list's own scrolling clipping
+     it at the edges/corners. */
+  padding: 10px;
+}
+
+.range-menu-item {
+  background: #1a1a24;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  padding: 12px 14px;
+  color: #f4f4f5;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+}
+
+.range-menu-item.active {
+  border-color: var(--color-primary);
+  background: rgba(229, 9, 20, 0.15);
+}
+
 /* Modals (Details, Search, Settings, Player) */
 .modal-overlay {
   position: fixed;
@@ -462,6 +506,13 @@ html, body {
    z-index 600) and embed (.player-screen, z-index 500) players — the
    default modal z-index of 200 rendered it invisibly behind them. */
 .server-menu-overlay {
+  z-index: 800;
+}
+
+/* Same issue as .server-menu-overlay above — the range menu also opens from
+   inside .in-player-episode-drawer (z-index 700), so it needs to clear that
+   too or it renders (and is clickable) behind the drawer. */
+.range-menu-overlay {
   z-index: 800;
 }
 
@@ -553,6 +604,39 @@ html, body {
 }
 
 /* Season / Episode Picker */
+
+/* Collapses a long, chunked season's episode ranges (which as a flat row of
+   buttons can run to dozens wide) behind one button that opens the TV-safe
+   rangeMenu.js picker instead — see .range-menu* below and hidden by default
+   via the [hidden] attribute when a season isn't chunked. */
+.range-picker-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: #d4d4d8;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  margin: 12px 0;
+}
+
+/* An author-stylesheet display rule always beats the UA [hidden] rule
+   regardless of selector specificity, so .range-picker-btn's own
+   `display: inline-flex` was silently keeping the button visible (as an
+   empty pill) even while the `hidden` attribute was set. */
+.range-picker-btn[hidden] {
+  display: none;
+}
+
+.range-picker-btn.tflix-focused {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px #ffffff;
+}
+
 .season-tabs {
   display: flex;
   gap: 10px;
@@ -577,6 +661,11 @@ html, body {
   background: var(--color-primary);
   color: #fff;
   border-color: var(--color-primary);
+}
+
+.season-ep-count {
+  opacity: 0.7;
+  font-weight: 500;
 }
 
 .episodes-grid {
@@ -617,6 +706,33 @@ html, body {
   font-weight: 700;
   padding: 2px 6px;
   border-radius: 4px;
+}
+
+/* Episode-availability badge for the currently-selected provider (see
+   DetailsModal.js's and EpisodeDrawer.js's loadAvailability) —
+   informational, not blocking. */
+.episode-unavailable .episode-thumb,
+.episode-unavailable .drawer-ep-thumb-wrap {
+  opacity: 0.55;
+}
+
+.episode-unavailable-badge {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(120,20,20,0.85);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .episode-info {

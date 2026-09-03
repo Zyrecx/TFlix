@@ -6,6 +6,7 @@ node_modules/
 .idea/
 dev/
 LOCAL-TESTING.md
+docs/screenshots/
 # Source files (since we're publishing the built files)
 mods/node_modules/
 service/node_modules/

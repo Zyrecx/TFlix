@@ -9,11 +9,14 @@ const STORAGE_KEYS = {
   WATCHLIST: 'tflix_watchlist',
   DEFAULT_PROVIDER: 'tflix_default_provider',
   LAST_TAB: 'tflix_last_tab',
-  CUSTOM_PROVIDERS: 'tflix_custom_providers',
-  PROVIDER_REPO_URL: 'tflix_provider_repo_url',
+  CUSTOM_PROVIDER_SOURCES: 'tflix_custom_provider_sources',
   PLAYER_MODE: 'tflix_player_mode',
-  SETUP_TOUR_SEEN: 'tflix_setup_tour_seen'
+  SETUP_TOUR_SEEN: 'tflix_setup_tour_seen',
+  CONFIRMED_SHOW_MAP: 'tflix_confirmed_show_map',
+  EPISODE_AVAILABILITY: 'tflix_episode_availability'
 };
+
+const EPISODE_AVAILABILITY_TTL_MS = 24 * 60 * 60 * 1000;
 
 export const storage = {
   getApiKey() {
@@ -49,40 +52,44 @@ export const storage = {
     localStorage.setItem(STORAGE_KEYS.PLAYER_MODE, mode);
   },
 
-  getProviderRepoUrl() {
-    return localStorage.getItem(STORAGE_KEYS.PROVIDER_REPO_URL) || '';
-  },
-
-  setProviderRepoUrl(url) {
-    if (!url || url.trim() === '') {
-      localStorage.removeItem(STORAGE_KEYS.PROVIDER_REPO_URL);
-    } else {
-      localStorage.setItem(STORAGE_KEYS.PROVIDER_REPO_URL, url.trim());
-    }
-  },
-
-  getCustomProviders() {
+  // Embed-type provider sources — each one a repository URL the user added,
+  // kept as its own group rather than merged into one flat list, so adding
+  // a second source doesn't wipe the first (see providers.js#fetchProvidersFromUrl).
+  getProviderSources() {
     try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEYS.CUSTOM_PROVIDERS) || '[]');
+      const sources = JSON.parse(localStorage.getItem(STORAGE_KEYS.CUSTOM_PROVIDER_SOURCES) || '[]');
+      return Array.isArray(sources) ? sources : [];
     } catch {
       return [];
     }
   },
 
-  setCustomProviders(providers) {
-    if (!Array.isArray(providers) || providers.length === 0) {
-      localStorage.removeItem(STORAGE_KEYS.CUSTOM_PROVIDERS);
+  setProviderSources(sources) {
+    if (!Array.isArray(sources) || sources.length === 0) {
+      localStorage.removeItem(STORAGE_KEYS.CUSTOM_PROVIDER_SOURCES);
     } else {
-      localStorage.setItem(STORAGE_KEYS.CUSTOM_PROVIDERS, JSON.stringify(providers));
+      localStorage.setItem(STORAGE_KEYS.CUSTOM_PROVIDER_SOURCES, JSON.stringify(sources));
     }
+  },
+
+  // Adds a new source, or replaces the existing one with the same URL
+  // (re-fetching a URL you already added updates it in place).
+  addProviderSource(url, providers) {
+    const sources = this.getProviderSources().filter(s => s.url !== url);
+    sources.push({ url, providers, addedAt: Date.now() });
+    this.setProviderSources(sources);
+  },
+
+  removeProviderSource(url) {
+    this.setProviderSources(this.getProviderSources().filter(s => s.url !== url));
+  },
+
+  getCustomProviders() {
+    return this.getProviderSources().flatMap(s => s.providers || []);
   },
 
   hasCustomProviders() {
     return this.getCustomProviders().length > 0;
-  },
-
-  clearCustomProviders() {
-    localStorage.removeItem(STORAGE_KEYS.CUSTOM_PROVIDERS);
   },
 
   getDefaultProvider() {
@@ -160,6 +167,16 @@ export const storage = {
     const list = this.getHistory().filter(i => i.id !== item.id);
     const existing = this.getHistory().find(i => i.id === item.id);
 
+    const season = item.season || (existing ? existing.season : 1);
+    const episode = item.episode || (existing ? existing.episode : 1);
+    // Only one history record is kept per show/movie id, so switching
+    // episodes reuses this same record. Carrying over `existing`'s saved
+    // progress here is only correct when it's progress for THIS episode —
+    // otherwise a fresh episode inherits whatever time the last one left
+    // off at, and the resume-progress check (which reads this record right
+    // after this call) "resumes" the new episode into the old one's spot.
+    const sameEpisode = existing && existing.season === season && existing.episode === episode;
+
     list.unshift({
       id: item.id,
       media_type: mediaType,
@@ -171,11 +188,11 @@ export const storage = {
       vote_average: item.vote_average,
       release_date: item.release_date || item.first_air_date,
       first_air_date: item.first_air_date || item.release_date,
-      season: item.season || (existing ? existing.season : 1),
-      episode: item.episode || (existing ? existing.episode : 1),
-      currentTime: typeof item.currentTime === 'number' ? item.currentTime : (existing?.currentTime || 0),
-      duration: typeof item.duration === 'number' ? item.duration : (existing?.duration || 0),
-      progress: typeof item.progress === 'number' ? item.progress : (existing?.progress || 0),
+      season,
+      episode,
+      currentTime: typeof item.currentTime === 'number' ? item.currentTime : (sameEpisode ? existing.currentTime : 0),
+      duration: typeof item.duration === 'number' ? item.duration : (sameEpisode ? existing.duration : 0),
+      progress: typeof item.progress === 'number' ? item.progress : (sameEpisode ? existing.progress : 0),
       watchedAt: Date.now()
     });
     localStorage.setItem(STORAGE_KEYS.WATCH_HISTORY, JSON.stringify(list.slice(0, 30)));
@@ -227,6 +244,58 @@ export const storage = {
   removeFromHistory(id) {
     const list = this.getHistory().filter(i => i.id !== id);
     localStorage.setItem(STORAGE_KEYS.WATCH_HISTORY, JSON.stringify(list));
+  },
+
+  // Caches a user's disambiguation choice for an ambiguous title match on a
+  // "direct" provider (see resolve()'s `needsConfirmation` outcome), keyed
+  // by provider + TMDB id, so a long-running series only ever prompts once —
+  // every subsequent episode reuses the confirmed show id.
+  getConfirmedShowMap() {
+    try {
+      return JSON.parse(localStorage.getItem(STORAGE_KEYS.CONFIRMED_SHOW_MAP) || '{}');
+    } catch {
+      return {};
+    }
+  },
+
+  getConfirmedShowId(providerId, tmdbId) {
+    const map = this.getConfirmedShowMap();
+    return (map[providerId] && map[providerId][tmdbId]) || null;
+  },
+
+  setConfirmedShowId(providerId, tmdbId, showId) {
+    const map = this.getConfirmedShowMap();
+    if (!map[providerId]) map[providerId] = {};
+    map[providerId][tmdbId] = showId;
+    localStorage.setItem(STORAGE_KEYS.CONFIRMED_SHOW_MAP, JSON.stringify(map));
+  },
+
+  // Client-side cache for streamScraper.js's listAvailableEpisodes, keyed
+  // the same way as confirmedShowId — a provider+show's available-episode
+  // set doesn't change often, so re-fetching it (a season-by-season walk on
+  // Stardima) on every episode-grid open would be wasteful. TTL because new
+  // episodes do get dubbed/added over time.
+  getEpisodeAvailability(providerId, tmdbId) {
+    try {
+      const map = JSON.parse(localStorage.getItem(STORAGE_KEYS.EPISODE_AVAILABILITY) || '{}');
+      const entry = map[providerId] && map[providerId][tmdbId];
+      if (!entry || Date.now() - entry.fetchedAt > EPISODE_AVAILABILITY_TTL_MS) return null;
+      return entry.episodes;
+    } catch {
+      return null;
+    }
+  },
+
+  setEpisodeAvailability(providerId, tmdbId, episodes) {
+    let map;
+    try {
+      map = JSON.parse(localStorage.getItem(STORAGE_KEYS.EPISODE_AVAILABILITY) || '{}');
+    } catch {
+      map = {};
+    }
+    if (!map[providerId]) map[providerId] = {};
+    map[providerId][tmdbId] = { episodes, fetchedAt: Date.now() };
+    localStorage.setItem(STORAGE_KEYS.EPISODE_AVAILABILITY, JSON.stringify(map));
   },
 
   hasSeenSetupTour() {

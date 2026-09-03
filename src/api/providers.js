@@ -28,7 +28,7 @@ const RELAY_BASE = 'http://127.0.0.1:47993';
 export const DEFAULT_PACK_INDEX_URL = 'https://tflix-providers.zyrex.workers.dev/index.json';
 
 let relayProviders = [];
-let relayPackInfo = null;
+let relayPacks = []; // every installed pack, side by side — see hlsRelay.js's per-pack subdirectories
 
 /**
  * Refreshes the in-memory cache of relay-registered direct providers.
@@ -44,17 +44,44 @@ export async function refreshRelayProviders() {
       id: p.id,
       name: p.name,
       description: p.description || '',
-      type: 'direct'
+      type: 'direct',
+      packManifestUrl: p.packManifestUrl || null,
+      packName: p.packName || null,
+      // See docs/PROVIDER_PACKS.md's "Optional capabilities" — fuzzyMatch
+      // gates the "wrong match?" control, supportsAvailability gates
+      // episode-availability badges (streamScraper.js's listAvailableEpisodes).
+      fuzzyMatch: Boolean(p.fuzzyMatch),
+      supportsAvailability: Boolean(p.supportsAvailability)
     }));
-    relayPackInfo = data.pack || null;
+    relayPacks = data.packs || [];
     return true;
   } catch {
     return false;
   }
 }
 
-export function getRelayPackInfo() {
-  return relayPackInfo;
+/**
+ * All installed direct provider packs, each with its own providerIds — for
+ * grouping the Settings UI by source rather than showing one "the pack".
+ */
+export function getRelayPacks() {
+  return relayPacks;
+}
+
+/**
+ * Uninstalls one pack (by its manifestUrl), leaving every other installed
+ * pack untouched.
+ */
+export async function uninstallPackDirect(manifestUrl) {
+  const res = await fetch(`${RELAY_BASE}/packs/uninstall`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: manifestUrl })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Uninstall failed');
+  await refreshRelayProviders();
+  return data;
 }
 
 /**
@@ -123,7 +150,7 @@ export async function fetchProvidersFromUrl(url) {
       tvUrl: p.tvUrl || (typeof p.getTvUrl === 'string' ? p.getTvUrl : '')
     }));
 
-  storage.setCustomProviders(normalized);
+  storage.addProviderSource(targetUrl, normalized);
   return normalized;
 }
 

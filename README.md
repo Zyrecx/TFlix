@@ -1,18 +1,41 @@
-# TFlix
+<div align="center">
 
-**TFlix** is a standalone 10-foot streaming web application for Samsung Smart TVs running **TizenBrew**. It's a self-contained TizenBrew *app* (not a mod injected into another site) — modern Netflix-inspired UI, rich metadata and search powered by your own **TMDB** key, seamless D-Pad navigation, and a pluggable multi-provider streaming engine.
+# 📺 TFlix
+
+**A standalone streaming app for Samsung Smart TVs, built for [TizenBrew](https://github.com/reisxd/TizenBrew).**
+Browse and watch from your own TMDB catalog, play from whatever streaming providers you choose to install — full D-pad navigation, no mouse or touch required.
+
+[![npm version](https://img.shields.io/npm/v/%40zyrecx%2Ftflix?labelColor=27303D&color=818cf8)](https://www.npmjs.com/package/@zyrecx/tflix)
+[![License: MIT](https://img.shields.io/github/license/Zyrecx/TFlix?labelColor=27303D&color=818cf8)](./LICENSE)
+
+[Get Started](#get-started) · [Provider Packs](#create-your-own-provider-pack) · [Report an Issue](https://github.com/Zyrecx/TFlix/issues)
+
+</div>
 
 > **Note:** The original TFlix was a TizenBrew mod that wrapped [Cineby.at](https://www.cineby.at). That codebase is archived on the [`v1-legacy`](https://github.com/Zyrecx/TFlix/tree/v1-legacy) branch and is no longer maintained — `main` is the current, standalone app described below.
 
 ---
 
+## Screenshots
+
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/home.jpg" alt="Home screen with trending and continue watching rows"></td>
+<td width="50%"><img src="docs/screenshots/details.jpg" alt="Title details modal with seasons and episodes"></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/screenshots/player.jpg" alt="Video player with full OSD transport controls"></td>
+<td width="50%"><img src="docs/screenshots/settings.jpg" alt="Settings screen for TMDB key and streaming providers"></td>
+</tr>
+</table>
+
+---
+
 ## Features
 
-- **10-Foot TV Remote Navigation** — 2D directional D-Pad navigation, focus indicators, and smooth carousel scrolling.
-- **Rich TMDB Catalog & Discovery** — Trending movies, popular series, genres, top rated titles, and full cast/season/episode info.
-- **Hybrid Playback Engine** — Native `Hls.js` + HTML5 `<video>` for direct HLS/MP4 sources, with full TV transport controls, and iframe-embed fallback for other sources.
-- **Full TV Video OSD Controls** — Play/Pause, ±10s skip, timeline scrubbing, subtitle/audio track selection, resume timestamps, and automatic next-episode.
-- **Search** — Uses the TV's own on-screen keyboard (or a paired phone via SmartThings) to type into a focusable search field.
+- **Rich TMDB Catalog & Discovery** — Trending movies, popular series, genres, top-rated titles, and full cast/season/episode info.
+- **Full Remote Control** — Navigate the entire app with your TV remote's D-pad.
+- **Hybrid Playback Engine** — Native `Hls.js` + HTML5 video for direct sources, iframe-embed fallback for others, both with full transport controls (play/pause, skip, scrub, subtitle/audio tracks, resume, auto-next-episode).
 - **Bring Your Own TMDB Key** — Free personal TMDB API key stored locally on the TV; no shared rate limits.
 - **Watch History & Watchlist** — Local resume timestamps and a saved watchlist, stored entirely on-device.
 - **Guided First-Run Setup** — A short setup tour walks new users through connecting a TMDB key and a streaming provider, including a QR-code phone-pairing flow so you don't have to type a key with a TV remote.
@@ -20,24 +43,45 @@
 
 ---
 
-## Streaming Providers
+## Get Started
 
-TFlix doesn't bundle any streaming sources in this repo or the npm package. Instead:
+### 1. Install TizenBrew
 
-- **Embed providers** (iframe-based) can be loaded from a community JSON list or your own, via `Settings → Streaming Providers`. See [`providers.example.json`](./providers.example.json) for the schema.
-- **Direct HLS providers** (native `Hls.js` playback) come from installable **provider packs** — small plugin bundles fetched at runtime, either by browsing a catalog or scanning a pairing QR code, both in `Settings → Add a Provider Pack`. This keeps any source-specific extraction code out of this repo entirely.
+TFlix runs as a module inside [**TizenBrew**](https://github.com/reisxd/TizenBrew), a way to sideload apps onto Samsung Smart TVs without fighting Tizen Studio. If you don't have it yet, follow TizenBrew's own install guide for your TV first — TFlix can't run without it.
 
-Want to build your own provider pack? See [`docs/PROVIDER_PACKS.md`](./docs/PROVIDER_PACKS.md) for the plugin contract and a working, fully legal example.
+### 2. Install TFlix
+
+1. Open **TizenBrew** on your Samsung TV.
+2. Choose to install a module from npm and enter the package name: `@zyrecx/tflix`.
+3. Confirm the install, then launch TFlix from your TizenBrew modules menu.
+
+### 3. Get a free TMDB API key
+
+TFlix pulls its whole catalog (trending, search, cast, artwork) from [**TMDB**](https://www.themoviedb.org/), using a key you request yourself — free, and not shared with other users.
+
+1. Create a TMDB account, then generate an API key at [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api).
+2. On first launch, TFlix's setup tour will ask for this key. You can type it with the remote, or scan the on-screen QR code to paste it in from your phone instead.
+
+<img src="docs/screenshots/setup-tmdb-key.jpg" alt="Setup tour step for connecting a TMDB key, with QR phone pairing" width="600">
+
+### 4. Add a streaming provider
+
+TFlix comes with one direct HLS provider set up out of the box (served from a Cloudflare Worker, kept out of this repo/npm package to avoid takedowns), plus support for adding your own embed providers. See [Streaming Providers](#streaming-providers) below for how that works, and `Settings → Streaming Providers` in-app to add more.
+
+<img src="docs/screenshots/setup-provider.jpg" alt="Setup tour step for adding a streaming provider" width="600">
 
 ---
 
-## Installation on Samsung TV
+## Streaming Providers
 
-### Via TizenBrew (Recommended)
-1. Open **TizenBrew** on your Samsung TV.
-2. Choose to install a module from npm and enter the package name: `@zyrecx/tflix`.
-3. Confirm the install.
-4. Launch TFlix from your TizenBrew modules menu, and follow the first-run setup tour to connect your TMDB key.
+TFlix doesn't host or bundle any streaming sources in this repo or the npm package — it's a player, not a source. Instead:
+
+- **Embed providers** (iframe-based) can be loaded from a community JSON list or your own, via `Settings → Streaming Providers`. See [`providers.example.json`](./providers.example.json) for the schema.
+- **Direct HLS providers** (native `Hls.js` playback) come from installable **provider packs** — small plugin bundles fetched at runtime, either by browsing a catalog or scanning a pairing QR code, both in `Settings → Add a Provider Pack`. This keeps any source-specific extraction code out of this repo entirely, and lets a pack be pulled independently if its source ever needs to come down.
+
+### Create your own provider pack
+
+Want to create a provider from a source? [`docs/PROVIDER_PACKS.md`](./docs/PROVIDER_PACKS.md) documents the full provider pack format with a working example — everything you need to build and share your own pack.
 
 ---
 
@@ -84,6 +128,20 @@ This compiles the app into the `dist/` directory, ready to be packaged by TizenB
 | **Rewind (`412`)** | `r` | Jump backward -10 seconds |
 | **Next Track (`MediaTrackNext`)** | `n` | Jump to Next TV Episode immediately |
 | **Stop (`MediaStop`)** | `s` | Stop playback and close player |
+
+---
+
+## Contributing & Feedback
+
+Found a bug, or have an idea for a feature? [Open an issue](https://github.com/Zyrecx/TFlix/issues) — bug reports and suggestions are both welcome.
+
+Pull requests are welcome too. For anything non-trivial, opening an issue first to discuss the change is appreciated but not required.
+
+---
+
+## Disclaimer
+
+TFlix is a player. It has no affiliation with, and does not host, index, or distribute any media content or streaming source — all content is fetched from third-party providers that users choose to add themselves.
 
 ---
 

@@ -34,6 +34,7 @@ import drama from 'lucide-static/icons/drama.svg?raw';
 import satellite from 'lucide-static/icons/satellite.svg?raw';
 import chevronLeft from 'lucide-static/icons/chevron-left.svg?raw';
 import chevronRight from 'lucide-static/icons/chevron-right.svg?raw';
+import chevronDown from 'lucide-static/icons/chevron-down.svg?raw';
 import check from 'lucide-static/icons/check.svg?raw';
 import plus from 'lucide-static/icons/plus.svg?raw';
 import key from 'lucide-static/icons/key.svg?raw';
@@ -52,16 +53,18 @@ import eyeOff from 'lucide-static/icons/eye-off.svg?raw';
 import info from 'lucide-static/icons/info.svg?raw';
 import plugZap from 'lucide-static/icons/plug-zap.svg?raw';
 import keyboard from 'lucide-static/icons/keyboard.svg?raw';
+import flag from 'lucide-static/icons/flag.svg?raw';
 
 const RAW_ICONS = {
   home: house, film, tv, bookmark, 'bookmark-plus': bookmarkPlus, 'bookmark-check': bookmarkCheck,
   search, settings, x, play, pause, 'skip-forward': skipForward, rewind, 'fast-forward': fastForward,
   captions, wifi, 'qr-code': qrCode, smartphone, zap, 'rotate-ccw': rotateCcw, plug, clock,
   flame, popcorn, star, rocket, drama, satellite, 'chevron-left': chevronLeft, 'chevron-right': chevronRight,
+  'chevron-down': chevronDown,
   check, plus, key, 'list-video': listVideo, 'trash-2': trash2, 'refresh-cw': refreshCw, download,
   'folder-open': folderOpen, server, 'circle-alert': circleAlert, 'triangle-alert': triangleAlert,
   'ellipsis-vertical': ellipsisVertical, 'loader-circle': loaderCircle, eye, 'eye-off': eyeOff,
-  info, 'plug-zap': plugZap, keyboard
+  info, 'plug-zap': plugZap, keyboard, flag
 };
 
 /**

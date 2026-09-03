@@ -76,9 +76,18 @@ var PACK_CONFIG_PATH = path.join(DATA_DIR, 'data', 'providerPack.json');
 
 var DESKTOP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
-function fetchRaw(targetUrl, headers, redirects) {
-  if (headers === undefined) headers = {};
+// `opts` is either a plain headers map (legacy call shape — every existing
+// provider file and fetchJson/fetchText call it this way) or a structured
+// { method, headers, body } object for a non-GET request. Discriminated by
+// presence of method/body/headers keys rather than a separate parameter, so
+// old pack files keep working unchanged.
+function fetchRaw(targetUrl, opts, redirects) {
+  if (opts === undefined) opts = {};
   if (redirects === undefined) redirects = 5;
+  var structured = Boolean(opts && (opts.method || opts.body !== undefined || opts.headers));
+  var headers = structured ? (opts.headers || {}) : opts;
+  var method = structured ? (opts.method || 'GET') : 'GET';
+  var body = structured ? opts.body : undefined;
   return new Promise(function (resolve, reject) {
     var u;
     try {
@@ -89,11 +98,14 @@ function fetchRaw(targetUrl, headers, redirects) {
     }
     var lib = u.protocol === 'http:' ? http : https;
     var reqHeaders = Object.assign({ 'User-Agent': DESKTOP_UA }, headers);
-    var req = lib.get(u, { headers: reqHeaders }, function (res) {
+    if (body !== undefined && reqHeaders['Content-Length'] === undefined) {
+      reqHeaders['Content-Length'] = Buffer.byteLength(typeof body === 'string' ? body : String(body));
+    }
+    var req = lib.request(u, { method: method, headers: reqHeaders }, function (res) {
       if ([301, 302, 303, 307, 308].indexOf(res.statusCode) !== -1 && res.headers.location && redirects > 0) {
         res.resume();
         var nextUrl = new URL(res.headers.location, targetUrl).toString();
-        fetchRaw(nextUrl, headers, redirects - 1).then(resolve, reject);
+        fetchRaw(nextUrl, opts, redirects - 1).then(resolve, reject);
         return;
       }
       var chunks = [];
@@ -105,6 +117,8 @@ function fetchRaw(targetUrl, headers, redirects) {
     });
     req.on('error', reject);
     req.setTimeout(15000, function () { req.destroy(new Error('Upstream request timed out')); });
+    if (body !== undefined) req.write(body);
+    req.end();
   });
 }
 
@@ -240,13 +254,31 @@ function isSafeManifestUrl(url) {
   return true;
 }
 
+// Multiple packs live side by side, each in its own subdirectory of
+// COMMUNITY_DIR keyed by a short hash of its manifest URL — installing one
+// pack must never touch another's files. PACK_CONFIG_PATH holds a map of
+// that hash -> { manifestUrl, name, installedAt, providerIds }.
+function packKey(manifestUrl) {
+  return crypto.createHash('sha1').update(manifestUrl).digest('hex').slice(0, 16);
+}
+
 function loadPackConfig() {
   ensurePackDirs();
-  if (!fs.existsSync(PACK_CONFIG_PATH)) return null;
+  if (!fs.existsSync(PACK_CONFIG_PATH)) return { packs: {} };
   try {
-    return JSON.parse(fs.readFileSync(PACK_CONFIG_PATH, 'utf-8'));
+    var parsed = JSON.parse(fs.readFileSync(PACK_CONFIG_PATH, 'utf-8'));
+    // Tolerate the old single-pack shape ({url,name,installedAt,providerIds})
+    // from before packs were keyed — treat it as one entry rather than
+    // silently discarding whatever pack the user already had installed.
+    if (parsed && !parsed.packs && parsed.url) {
+      var legacyKey = packKey(parsed.url);
+      var legacy = {};
+      legacy[legacyKey] = { manifestUrl: parsed.url, name: parsed.name, installedAt: parsed.installedAt, providerIds: parsed.providerIds };
+      return { packs: legacy };
+    }
+    return (parsed && parsed.packs) ? parsed : { packs: {} };
   } catch (e) {
-    return null;
+    return { packs: {} };
   }
 }
 
@@ -255,14 +287,18 @@ function savePackConfig(config) {
   fs.writeFileSync(PACK_CONFIG_PATH, JSON.stringify(config, null, 2));
 }
 
-function clearCommunityProviderFiles() {
-  ensurePackDirs();
-  var files = fs.readdirSync(COMMUNITY_DIR);
+function packDirFor(manifestUrl) {
+  return path.join(COMMUNITY_DIR, packKey(manifestUrl));
+}
+
+function clearDirFiles(dir) {
+  if (!fs.existsSync(dir)) return;
+  var files = fs.readdirSync(dir);
   for (var i = 0; i < files.length; i++) {
     var f = files[i];
     // fs.rmSync needs Node 14.14+; this sandbox runs v12.4.0 — these are
     // always plain files (never directories), so unlinkSync is equivalent.
-    if (f.slice(-3) === '.js') fs.unlinkSync(path.join(COMMUNITY_DIR, f));
+    if (f.slice(-3) === '.js') fs.unlinkSync(path.join(dir, f));
   }
 }
 
@@ -277,8 +313,11 @@ function requireFresh(absPath) {
 }
 
 /**
- * Fetches a manifest + its provider files, writes them to the local cache,
- * and returns { name, installed: [ids], errors: [{id, error}] }.
+ * Fetches a manifest + its provider files and writes them into this pack's
+ * own subdirectory (named after a hash of manifestUrl), leaving every other
+ * installed pack untouched. Reinstalling the same manifestUrl replaces just
+ * that pack's own files (e.g. picking up an update). Returns
+ * { name, installed: [ids], errors: [{id, error}] }.
  */
 async function installPack(manifestUrl) {
   if (!isSafeManifestUrl(manifestUrl)) {
@@ -291,7 +330,9 @@ async function installPack(manifestUrl) {
   }
 
   ensurePackDirs();
-  clearCommunityProviderFiles();
+  var dir = packDirFor(manifestUrl);
+  fs.mkdirSync(dir, { recursive: true });
+  clearDirFiles(dir);
 
   var installed = [];
   var errors = [];
@@ -301,7 +342,7 @@ async function installPack(manifestUrl) {
       if (!entry || !entry.id || !entry.file) throw new Error('manifest entry missing id/file');
       var fileUrl = new URL(entry.file, url).toString();
       var code = await fetchText(fileUrl);
-      var destPath = path.join(COMMUNITY_DIR, entry.id + '.js');
+      var destPath = path.join(dir, entry.id + '.js');
       fs.writeFileSync(destPath, code);
 
       // Validate it actually loads and exposes the right shape before
@@ -318,32 +359,63 @@ async function installPack(manifestUrl) {
     }
   }
 
-  savePackConfig({
-    url: manifestUrl,
+  var config = loadPackConfig();
+  config.packs[packKey(manifestUrl)] = {
+    manifestUrl: manifestUrl,
     name: manifest.name || 'Unnamed pack',
     installedAt: new Date().toISOString(),
     providerIds: installed
-  });
+  };
+  savePackConfig(config);
 
   return { name: manifest.name || 'Unnamed pack', installed: installed, errors: errors };
+}
+
+/**
+ * Removes one installed pack's files and config entry, leaving every other
+ * pack untouched.
+ */
+function uninstallPack(manifestUrl) {
+  var dir = packDirFor(manifestUrl);
+  clearDirFiles(dir);
+  if (fs.existsSync(dir)) {
+    try { fs.rmdirSync(dir); } catch (e) { /* not empty (unexpected non-.js file) — leave it */ }
+  }
+  var config = loadPackConfig();
+  var key = packKey(manifestUrl);
+  var existed = Boolean(config.packs[key]);
+  delete config.packs[key];
+  savePackConfig(config);
+  return existed;
 }
 
 function loadCommunityProviders() {
   var found = [];
   if (!fs.existsSync(COMMUNITY_DIR)) return found;
-  var files = fs.readdirSync(COMMUNITY_DIR).filter(function (f) { return f.slice(-3) === '.js'; });
-  for (var i = 0; i < files.length; i++) {
-    var file = files[i];
-    try {
-      var mod = requireFresh(path.join(COMMUNITY_DIR, file));
-      var provider = mod && mod.default ? mod.default : mod;
-      if (!provider || !provider.id || typeof provider.resolve !== 'function') {
-        console.warn('[hlsRelay] Skipping ' + file + ': missing id/resolve export');
-        continue;
+  var config = loadPackConfig();
+  var entries = fs.readdirSync(COMMUNITY_DIR, { withFileTypes: true });
+  for (var e = 0; e < entries.length; e++) {
+    if (!entries[e].isDirectory()) continue; // skip stray files from the pre-multi-pack layout
+    var packEntry = config.packs[entries[e].name];
+    var dir = path.join(COMMUNITY_DIR, entries[e].name);
+    var files = fs.readdirSync(dir).filter(function (f) { return f.slice(-3) === '.js'; });
+    for (var i = 0; i < files.length; i++) {
+      var file = files[i];
+      try {
+        var mod = requireFresh(path.join(dir, file));
+        var provider = mod && mod.default ? mod.default : mod;
+        if (!provider || !provider.id || typeof provider.resolve !== 'function') {
+          console.warn('[hlsRelay] Skipping ' + file + ': missing id/resolve export');
+          continue;
+        }
+        // Tag with source pack info so /providers can group by source in
+        // the Settings UI — not part of the pack-authoring contract itself.
+        provider._packManifestUrl = packEntry ? packEntry.manifestUrl : null;
+        provider._packName = packEntry ? packEntry.name : null;
+        found.push(provider);
+      } catch (err) {
+        console.error('[hlsRelay] Failed to load provider ' + file + ':', err.message);
       }
-      found.push(provider);
-    } catch (e) {
-      console.error('[hlsRelay] Failed to load provider ' + file + ':', e.message);
     }
   }
   return found;
@@ -367,7 +439,11 @@ function loadAllProviders() {
     for (var j = 0; j < aliases.length; j++) registry.set(aliases[j], provider);
   }
   var list = Array.from(new Set(registry.values())).map(function (p) {
-    return { id: p.id, name: p.name, description: p.description || '' };
+    return {
+      id: p.id, name: p.name, description: p.description || '',
+      packManifestUrl: p._packManifestUrl || null, packName: p._packName || null,
+      fuzzyMatch: Boolean(p.fuzzyMatch), supportsAvailability: Boolean(p.supportsAvailability)
+    };
   });
   return { registry: registry, list: list };
 }
@@ -396,20 +472,26 @@ function lanAddress() {
   return private192 || private10 || private172 || candidates[0] || '127.0.0.1';
 }
 
-function proxied(absoluteUrl) {
-  return 'http://127.0.0.1:' + PORT + '/hls?url=' + encodeURIComponent(absoluteUrl);
+// `referer`, when a provider supplies one, is threaded through every proxied
+// URL (master playlist, sub-playlists, segments) so the upstream CDN's
+// hotlink protection sees the same Referer on every request in the chain —
+// some hosts 403 anything else, including no Referer at all.
+function proxied(absoluteUrl, referer) {
+  var url = 'http://127.0.0.1:' + PORT + '/hls?url=' + encodeURIComponent(absoluteUrl);
+  if (referer) url += '&ref=' + encodeURIComponent(referer);
+  return url;
 }
 
-function rewritePlaylist(text, baseUrl) {
+function rewritePlaylist(text, baseUrl, referer) {
   return text.split('\n').map(function (line) {
     if (line.indexOf('#') === 0) {
       return line.replace(/URI="([^"]+)"/g, function (_m, uri) {
-        return 'URI="' + proxied(new URL(uri, baseUrl).toString()) + '"';
+        return 'URI="' + proxied(new URL(uri, baseUrl).toString(), referer) + '"';
       });
     }
     var trimmed = line.trim();
     if (!trimmed) return line;
-    return proxied(new URL(trimmed, baseUrl).toString());
+    return proxied(new URL(trimmed, baseUrl).toString(), referer);
   }).join('\n');
 }
 
@@ -542,7 +624,11 @@ async function main() {
 
         if (reqUrl.pathname === '/providers') {
           res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ providers: list, pack: loadPackConfig() }));
+          var packsConfig = loadPackConfig();
+          var packsList = Object.keys(packsConfig.packs).map(function (key) {
+            return Object.assign({ key: key }, packsConfig.packs[key]);
+          });
+          res.end(JSON.stringify({ providers: list, packs: packsList }));
           return;
         }
 
@@ -563,12 +649,39 @@ async function main() {
               year: reqUrl.searchParams.get('year') || '',
               isTv: reqUrl.searchParams.get('isTv') === '1',
               season: reqUrl.searchParams.get('season') || '1',
-              episode: reqUrl.searchParams.get('episode') || '1'
+              episode: reqUrl.searchParams.get('episode') || '1',
+              confirmedShowId: reqUrl.searchParams.get('confirmedShowId') || '',
+              forceConfirm: reqUrl.searchParams.get('forceConfirm') === '1'
             }, providerHttp);
+
+            // Three possible resolve() outcomes, checked in order:
+            if (result && result.needsConfirmation) {
+              // Ambiguous title match — hand candidates back to the app to
+              // ask the user, rather than proxying/rewriting anything here.
+              res.end(JSON.stringify({
+                needsConfirmation: true,
+                candidates: result.candidates || [],
+                providerName: result.providerName
+              }));
+              return;
+            }
+            if (result && result.embedUrl) {
+              // Resolver couldn't (or chose not to) extract a raw stream —
+              // hand back an iframe-able URL instead. Must NOT go through
+              // proxied(), which rewrites HLS playlists, not HTML pages.
+              res.end(JSON.stringify({
+                embedUrl: result.embedUrl,
+                providerName: result.providerName
+              }));
+              return;
+            }
+            if (!result || !result.streamUrl) {
+              throw new Error('Provider resolve() returned neither streamUrl, embedUrl, nor needsConfirmation');
+            }
             res.end(JSON.stringify({
-              streamUrl: proxied(result.streamUrl),
+              streamUrl: proxied(result.streamUrl, result.referer),
               subtitles: (result.subtitles || []).map(function (s) {
-                return Object.assign({}, s, { src: proxied(s.src) });
+                return Object.assign({}, s, { src: proxied(s.src, result.referer) });
               }),
               providerName: result.providerName
             }));
@@ -579,15 +692,51 @@ async function main() {
           return;
         }
 
+        // Episode-availability badges. Only meaningful for a provider that
+        // opted in via supportsAvailability (see docs/PROVIDER_PACKS.md) and
+        // only ever called by the app with an already-*confirmed* showId —
+        // there's nothing useful (or safe) to report against an unconfirmed
+        // guess, so this refuses rather than silently resolving one itself.
+        if (reqUrl.pathname === '/episodes') {
+          var epProviderId = reqUrl.searchParams.get('provider');
+          var epProvider = registry.get(epProviderId);
+          res.setHeader('Content-Type', 'application/json');
+          if (!epProvider) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'No provider registered for "' + epProviderId + '"' }));
+            return;
+          }
+          if (!epProvider.supportsAvailability || typeof epProvider.listEpisodes !== 'function') {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: epProviderId + ' does not support episode availability' }));
+            return;
+          }
+          var epConfirmedShowId = reqUrl.searchParams.get('confirmedShowId') || '';
+          if (!epConfirmedShowId) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'confirmedShowId is required' }));
+            return;
+          }
+          try {
+            var epResult = await epProvider.listEpisodes({ confirmedShowId: epConfirmedShowId }, providerHttp);
+            res.end(JSON.stringify({ episodes: (epResult && epResult.episodes) || [] }));
+          } catch (e) {
+            res.statusCode = 502;
+            res.end(JSON.stringify({ error: e.message || String(e) }));
+          }
+          return;
+        }
+
         if (reqUrl.pathname === '/hls') {
           var target = reqUrl.searchParams.get('url');
+          var referer = reqUrl.searchParams.get('ref') || undefined;
           if (!target) {
             res.statusCode = 400;
             res.end('missing url');
             return;
           }
           try {
-            var upstream = await fetchRaw(target);
+            var upstream = await fetchRaw(target, referer ? { Referer: referer } : undefined);
             if (upstream.statusCode >= 400) {
               res.statusCode = upstream.statusCode;
               res.end('upstream ' + upstream.statusCode);
@@ -597,7 +746,7 @@ async function main() {
             var looksLikePlaylist = ct.indexOf('mpegurl') !== -1 || target.split('?')[0].toLowerCase().slice(-5) === '.m3u8';
             if (looksLikePlaylist) {
               res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-              res.end(rewritePlaylist(upstream.body.toString('utf-8'), upstream.finalUrl || target));
+              res.end(rewritePlaylist(upstream.body.toString('utf-8'), upstream.finalUrl || target, referer));
             } else {
               res.setHeader('Content-Type', ct || 'application/octet-stream');
               res.end(upstream.body);
@@ -703,6 +852,37 @@ async function main() {
               list = directReloaded.list;
               console.log('[hlsRelay] Provider pack installed directly: ' + directResult.name + ' -> ' + directResult.installed.join(', '));
               res.end(JSON.stringify(directResult));
+            } catch (e) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: e.message || String(e) }));
+            }
+          });
+          return;
+        }
+
+        // Removes one installed pack, leaving all others in place. Same
+        // loopback-only gating as /packs/install — this is a local device
+        // settings action, not something a phone-pairing flow needs.
+        if (reqUrl.pathname === '/packs/uninstall' && req.method === 'POST') {
+          var uninstallRemote = (req.socket.remoteAddress || '').replace('::ffff:', '');
+          if (['127.0.0.1', '::1', 'localhost'].indexOf(uninstallRemote) === -1) {
+            res.statusCode = 403;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: 'This endpoint is only available to the app running on this device.' }));
+            return;
+          }
+          var uninstallChunks = [];
+          req.on('data', function (c) { uninstallChunks.push(c); });
+          req.on('end', function () {
+            res.setHeader('Content-Type', 'application/json');
+            try {
+              var uninstallBody = JSON.parse(Buffer.concat(uninstallChunks).toString('utf-8') || '{}');
+              if (!uninstallBody.url) throw new Error('Missing url');
+              var removed = uninstallPack(uninstallBody.url);
+              var uninstallReloaded = loadAllProviders();
+              registry = uninstallReloaded.registry;
+              list = uninstallReloaded.list;
+              res.end(JSON.stringify({ removed: removed }));
             } catch (e) {
               res.statusCode = 400;
               res.end(JSON.stringify({ error: e.message || String(e) }));

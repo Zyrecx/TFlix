@@ -1,12 +1,28 @@
 import QRCode from 'qrcode';
 import { storage } from '../store/storage.js';
 import { tmdb } from '../api/tmdb.js';
-import { getProviders, fetchProvidersFromUrl, refreshRelayProviders, getRelayPackInfo, isRelayAvailable, fetchPackCatalog, installPackDirect } from '../api/providers.js';
+import { getProviders, fetchProvidersFromUrl, refreshRelayProviders, getRelayPacks, uninstallPackDirect, isRelayAvailable, fetchPackCatalog, installPackDirect } from '../api/providers.js';
 import { nav } from '../nav/spatialNav.js';
 import { SetupTourModal } from './SetupTourModal.js';
 import { icon } from '../ui/icons.js';
 
 const RELAY_BASE = 'http://127.0.0.1:47993';
+
+// Identifies a focused element across an innerHTML rebuild so updateView()
+// can restore focus to the same logical button (e.g. the pack the user just
+// installed) instead of always jumping to the first focusable element.
+function buildFocusSelector(el) {
+  if (!el) return null;
+  if (el.id) return `#${CSS.escape(el.id)}`;
+  if (el.dataset.manifestUrl) {
+    const cls = el.classList.contains('install-pack-btn') ? '.install-pack-btn'
+      : el.classList.contains('uninstall-pack-btn') ? '.uninstall-pack-btn'
+      : null;
+    if (cls) return `${cls}[data-manifest-url="${CSS.escape(el.dataset.manifestUrl)}"]`;
+  }
+  if (el.dataset.provider) return `.provider-btn[data-provider="${CSS.escape(el.dataset.provider)}"]`;
+  return null;
+}
 
 export class SettingsModal {
   constructor({ onClose, onSettingsChanged }) {
@@ -15,7 +31,7 @@ export class SettingsModal {
     this.modalEl = null;
     this.keyInput = storage.getApiKey();
     this.keyVisible = false;
-    this.providerRepoInput = storage.getProviderRepoUrl();
+    this.providerRepoInput = ''; // "add a source" field — always starts empty, existing sources are listed separately
     this.selectedProvider = storage.getDefaultProvider();
     this.backHandler = this.close.bind(this);
     this.pairing = null; // { code, pairUrl, expiresAt, status: 'pending'|'done'|'expired'|'error', message }
@@ -69,6 +85,16 @@ export class SettingsModal {
       this.selectedProvider = providers[0].id;
       storage.setDefaultProvider(this.selectedProvider);
     }
+
+    const prevContainer = this.modalEl.querySelector('.modal-container');
+    const scrollTop = prevContainer ? prevContainer.scrollTop : 0;
+    // nav.setScope() always jumps focus to the first focusable element and
+    // smooth-scrolls it into view — calling it on every re-render (install/
+    // uninstall a pack, pick a default provider) fought the scrollTop
+    // restore below, since scrollIntoView's animation keeps running after a
+    // later synchronous scrollTop assignment. Re-focus the same element
+    // instead so nothing scrolls at all.
+    const focusSelector = buildFocusSelector(this.modalEl.querySelector('.tflx-focused'));
 
     this.modalEl.innerHTML = `
       <div class="modal-container" style="padding: 40px; max-width: 920px; max-height: 90vh; overflow-y: auto;">
@@ -137,22 +163,17 @@ export class SettingsModal {
                 ${hasProviders ? `${icon('check', { size: 14 })} ${providers.length} Providers Active` : 'No Providers Configured'}
               </div>
             </div>
-            ${hasProviders ? `
-              <button class="btn btn-secondary focusable" id="btn-clear-providers" style="padding: 8px 14px; font-size: 13px; color: #ef4444;">
-                Clear
-              </button>
-            ` : ''}
           </div>
 
           <div style="margin-bottom: 14px;">
-            <div style="font-size: 12px; color: #a1a1aa; margin-bottom: 6px; font-weight: 600;">Provider Repository URL:</div>
+            <div style="font-size: 12px; color: #a1a1aa; margin-bottom: 6px; font-weight: 600;">Add Provider Repository:</div>
             <div style="display: flex; gap: 12px; align-items: center;">
-              <input 
-                type="text" 
-                id="provider-repo-input" 
-                class="focusable" 
-                placeholder="https://.../providers.json" 
-                value="${this.providerRepoInput}" 
+              <input
+                type="text"
+                id="provider-repo-input"
+                class="focusable"
+                placeholder="https://.../providers.json"
+                value="${this.providerRepoInput}"
                 autocomplete="off"
                 autocorrect="off"
                 autocapitalize="off"
@@ -160,11 +181,13 @@ export class SettingsModal {
                 style="flex: 1; background: #16161f; border: 2px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 12px 16px; color: #fff; font-size: 14px; font-family: monospace; outline: none; transition: border-color 0.2s;"
               />
               <button class="btn btn-secondary focusable" id="btn-fetch-custom-repo" style="padding: 12px 20px; white-space: nowrap;">
-                Fetch URL
+                ${icon('plus', { size: 14 })} Add
               </button>
             </div>
             <div id="provider-feedback" style="font-size: 14px; min-height: 22px; margin-top: 6px;"></div>
           </div>
+
+          ${this.renderEmbedSources()}
 
           ${hasProviders ? `
             <div style="margin-top: 16px;">
@@ -288,14 +311,28 @@ export class SettingsModal {
       });
     }
 
-    const clearProvidersBtn = this.modalEl.querySelector('#btn-clear-providers');
-    if (clearProvidersBtn) {
-      clearProvidersBtn.addEventListener('click', () => {
-        storage.clearCustomProviders();
-        this.selectedProvider = '';
+    this.modalEl.querySelectorAll('.remove-source-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        storage.removeProviderSource(e.currentTarget.dataset.sourceUrl);
+        this.selectedProvider = storage.getDefaultProvider();
         this.updateView();
       });
-    }
+    });
+
+    this.modalEl.querySelectorAll('.uninstall-pack-btn').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const button = e.currentTarget;
+        const manifestUrl = button.dataset.manifestUrl;
+        button.disabled = true;
+        try {
+          await uninstallPackDirect(manifestUrl);
+          this.selectedProvider = storage.getDefaultProvider();
+        } catch (err) {
+          console.warn('[SettingsModal] Pack uninstall failed:', err);
+        }
+        this.updateView();
+      });
+    });
 
     const recheckRelayBtn = this.modalEl.querySelector('#btn-recheck-relay');
     if (recheckRelayBtn) {
@@ -379,7 +416,15 @@ export class SettingsModal {
       });
     }
 
-    nav.setScope(this.modalEl);
+    const restoreTarget = focusSelector ? this.modalEl.querySelector(focusSelector) : null;
+    if (restoreTarget) {
+      nav.focusElement(restoreTarget, false);
+    } else {
+      nav.setScope(this.modalEl);
+    }
+
+    const container = this.modalEl.querySelector('.modal-container');
+    if (container) container.scrollTop = scrollTop;
   }
 
   async loadProvidersFromUrl(url) {
@@ -391,15 +436,17 @@ export class SettingsModal {
 
     try {
       const providers = await fetchProvidersFromUrl(url);
-      storage.setProviderRepoUrl(url);
-      this.providerRepoInput = url;
-      this.selectedProvider = providers[0] ? providers[0].id : '';
+      this.providerRepoInput = ''; // added — clear the field for the next one
+      if (!this.selectedProvider && providers[0]) {
+        this.selectedProvider = providers[0].id;
+        storage.setDefaultProvider(this.selectedProvider);
+      }
       this.updateView();
 
       const fb = this.modalEl.querySelector('#provider-feedback');
       if (fb) {
         fb.style.color = '#4ade80';
-        fb.textContent = `Successfully loaded ${providers.length} providers!`;
+        fb.textContent = `Added ${providers.length} provider(s) from this source!`;
       }
     } catch (err) {
       if (feedback) {
@@ -445,16 +492,52 @@ export class SettingsModal {
     }
   }
 
+  // Embed-type provider sources (see storage.js#getProviderSources) — each
+  // one its own group, since fetching a new repository URL adds to the list
+  // rather than replacing whatever was there before.
+  renderEmbedSources() {
+    const sources = storage.getProviderSources();
+    if (sources.length === 0) return '';
+    return `
+      <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px;">
+        ${sources.map(source => `
+          <div style="background: #1a1a24; padding: 12px 18px; border-radius: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
+              <div style="min-width: 0;">
+                <div style="font-size: 12px; font-weight: 700; color: #fff; font-family: monospace; word-break: break-all;">${source.url}</div>
+                <div style="font-size: 12px; color: #71717a; margin-top: 2px;">${source.providers.length} provider(s): ${source.providers.map(p => p.name).join(', ')}</div>
+              </div>
+              <button class="btn btn-secondary focusable remove-source-btn" data-source-url="${source.url}" style="padding: 6px 12px; font-size: 12px; color: #ef4444; white-space: nowrap;">
+                ${icon('trash-2', { size: 13 })} Remove
+              </button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  // Direct provider packs, resolved by the local relay — each installed
+  // pack listed and removable independently (see hlsRelay.js's per-pack
+  // subdirectories, which make installing one pack no longer wipe another).
   renderPackStatus() {
-    const pack = getRelayPackInfo();
-    if (!pack) {
-      return `<div style="font-size: 13px; color: #71717a; margin-bottom: 12px;">No provider pack installed yet.</div>`;
+    const packs = getRelayPacks();
+    if (packs.length === 0) {
+      return `<div style="font-size: 13px; color: #71717a; margin-bottom: 12px;">No provider packs installed yet.</div>`;
     }
     return `
-      <div style="background: #1a1a24; padding: 12px 18px; border-radius: 8px; margin-bottom: 12px;">
-        <div style="font-size: 11px; color: #71717a; text-transform: uppercase; font-weight: 700;">Installed Pack</div>
-        <div style="font-size: 14px; font-weight: 600; color: #4ade80;">${pack.name}</div>
-        <div style="font-size: 12px; color: #71717a; margin-top: 2px;">${pack.providerIds.length} provider(s) &middot; installed ${new Date(pack.installedAt).toLocaleString()}</div>
+      <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px;">
+        ${packs.map(pack => `
+          <div style="background: #1a1a24; padding: 12px 18px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; gap: 12px;">
+            <div style="min-width: 0;">
+              <div style="font-size: 14px; font-weight: 600; color: #4ade80;">${pack.name}</div>
+              <div style="font-size: 12px; color: #71717a; margin-top: 2px;">${pack.providerIds.length} provider(s) &middot; installed ${new Date(pack.installedAt).toLocaleString()}</div>
+            </div>
+            <button class="btn btn-secondary focusable uninstall-pack-btn" data-manifest-url="${pack.manifestUrl}" style="padding: 6px 12px; font-size: 12px; color: #ef4444; white-space: nowrap;">
+              ${icon('trash-2', { size: 13 })} Uninstall
+            </button>
+          </div>
+        `).join('')}
       </div>
     `;
   }
@@ -467,10 +550,14 @@ export class SettingsModal {
       return `<div style="color: #ef4444; font-size: 14px; margin-bottom: 8px;">${this.catalog.error}</div>
         <button class="btn btn-secondary focusable" id="btn-browse-packs" style="padding: 8px 16px; font-size: 13px;">Retry</button>`;
     }
-    const installedIds = new Set((getRelayPackInfo()?.providerIds) || []);
+    const installedManifestUrls = new Set(getRelayPacks().map(p => p.manifestUrl));
+    const browsable = this.catalog.filter(pack => !installedManifestUrls.has(pack.manifestUrl));
+    if (browsable.length === 0) {
+      return `<div style="font-size: 13px; color: #71717a;">All available packs are already installed.</div>`;
+    }
     return `
       <div style="display: flex; flex-direction: column; gap: 10px;">
-        ${this.catalog.map(pack => {
+        ${browsable.map(pack => {
           const installing = this.catalogInstalling === pack.manifestUrl;
           return `
             <div style="background: #1a1a24; padding: 14px 18px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; gap: 16px;">
