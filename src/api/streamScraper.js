@@ -83,7 +83,7 @@ export async function resolveDirectStream(providerId, media, season = 1, episode
   const title = rawTitle.replace(/\s*-\s*S\d+E\d+\s*$/i, '');
   const year = (media.release_date || media.first_air_date || '').split('-')[0] || '';
   const imdbId = media.imdb_id || media.external_ids?.imdb_id || '';
-  const cachedShowId = confirmedShowId || storage.getConfirmedShowId(providerId, String(media.id));
+  const cachedShowId = confirmedShowId || storage.getConfirmedShowId(providerId, String(media.id), isTv ? season : null);
 
   const params = new URLSearchParams({
     provider: providerId,
@@ -126,11 +126,11 @@ export async function resolveDirectStream(providerId, media, season = 1, episode
  * doesn't support it, or show not yet confirmed — callers should treat null
  * as "don't show badges," not surface it as a failure.
  */
-export async function listAvailableEpisodes(providerId, tmdbId) {
-  const confirmedShowId = storage.getConfirmedShowId(providerId, String(tmdbId));
+export async function listAvailableEpisodes(providerId, tmdbId, season = null) {
+  const confirmedShowId = storage.getConfirmedShowId(providerId, String(tmdbId), season);
   if (!confirmedShowId) return null;
 
-  const cached = storage.getEpisodeAvailability(providerId, String(tmdbId));
+  const cached = storage.getEpisodeAvailability(providerId, String(tmdbId), season);
   if (cached) return cached;
 
   const available = await isRelayAvailable();
@@ -142,7 +142,7 @@ export async function listAvailableEpisodes(providerId, tmdbId) {
     if (!res.ok) return null;
     const data = await res.json();
     if (!Array.isArray(data.episodes)) return null;
-    storage.setEpisodeAvailability(providerId, String(tmdbId), data.episodes);
+    storage.setEpisodeAvailability(providerId, String(tmdbId), data.episodes, season);
     return data.episodes;
   } catch {
     return null;

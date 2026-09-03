@@ -211,7 +211,8 @@ export class PlayerModal {
     this.playerEl.querySelectorAll('[data-candidate-id]').forEach(btn => {
       btn.addEventListener('click', () => {
         const showId = btn.getAttribute('data-candidate-id');
-        storage.setConfirmedShowId(this.currentProviderId, String(this.media.id), showId);
+        const isTv = this.media.media_type === 'tv' || this.media.mediaType === 'tv';
+        storage.setConfirmedShowId(this.currentProviderId, String(this.media.id), showId, isTv ? (this.media.season || 1) : null);
         this.renderNativePlayer();
       });
     });

@@ -42,7 +42,7 @@ export class DetailsModal {
     const provider = getProviders().find(p => p.id === providerId);
     if (!provider || !provider.supportsAvailability) return;
 
-    const episodes = await listAvailableEpisodes(providerId, this.details.id);
+    const episodes = await listAvailableEpisodes(providerId, this.details.id, this.selectedSeason);
     if (!episodes) return;
 
     this.availableEpisodes = new Set(episodes);

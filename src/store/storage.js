@@ -250,6 +250,17 @@ export const storage = {
   // "direct" provider (see resolve()'s `needsConfirmation` outcome), keyed
   // by provider + TMDB id, so a long-running series only ever prompts once —
   // every subsequent episode reuses the confirmed show id.
+  //
+  // `season` is folded into the key (as ":sN") for TV so a confirmation made
+  // while watching one season never gets reused to resolve another — some
+  // provider catalogs (e.g. GogoAnime) give every season its own separate
+  // slug, so a show-level-only key would silently pin every season to
+  // whichever one the user happened to confirm first. Pass `null`/omit for
+  // movies, which have no season to disambiguate.
+  _showKey(tmdbId, season) {
+    return season != null ? `${tmdbId}:s${season}` : String(tmdbId);
+  },
+
   getConfirmedShowMap() {
     try {
       return JSON.parse(localStorage.getItem(STORAGE_KEYS.CONFIRMED_SHOW_MAP) || '{}');
@@ -258,27 +269,26 @@ export const storage = {
     }
   },
 
-  getConfirmedShowId(providerId, tmdbId) {
+  getConfirmedShowId(providerId, tmdbId, season = null) {
     const map = this.getConfirmedShowMap();
-    return (map[providerId] && map[providerId][tmdbId]) || null;
+    return (map[providerId] && map[providerId][this._showKey(tmdbId, season)]) || null;
   },
 
-  setConfirmedShowId(providerId, tmdbId, showId) {
+  setConfirmedShowId(providerId, tmdbId, showId, season = null) {
     const map = this.getConfirmedShowMap();
     if (!map[providerId]) map[providerId] = {};
-    map[providerId][tmdbId] = showId;
+    map[providerId][this._showKey(tmdbId, season)] = showId;
     localStorage.setItem(STORAGE_KEYS.CONFIRMED_SHOW_MAP, JSON.stringify(map));
   },
 
   // Client-side cache for streamScraper.js's listAvailableEpisodes, keyed
-  // the same way as confirmedShowId — a provider+show's available-episode
-  // set doesn't change often, so re-fetching it (a season-by-season walk on
-  // Stardima) on every episode-grid open would be wasteful. TTL because new
-  // episodes do get dubbed/added over time.
-  getEpisodeAvailability(providerId, tmdbId) {
+  // the same way as confirmedShowId (including the season fold-in — an
+  // available-episode list is for one season's slug, not the whole show).
+  // TTL because new episodes do get dubbed/added over time.
+  getEpisodeAvailability(providerId, tmdbId, season = null) {
     try {
       const map = JSON.parse(localStorage.getItem(STORAGE_KEYS.EPISODE_AVAILABILITY) || '{}');
-      const entry = map[providerId] && map[providerId][tmdbId];
+      const entry = map[providerId] && map[providerId][this._showKey(tmdbId, season)];
       if (!entry || Date.now() - entry.fetchedAt > EPISODE_AVAILABILITY_TTL_MS) return null;
       return entry.episodes;
     } catch {
@@ -286,7 +296,7 @@ export const storage = {
     }
   },
 
-  setEpisodeAvailability(providerId, tmdbId, episodes) {
+  setEpisodeAvailability(providerId, tmdbId, episodes, season = null) {
     let map;
     try {
       map = JSON.parse(localStorage.getItem(STORAGE_KEYS.EPISODE_AVAILABILITY) || '{}');
@@ -294,7 +304,7 @@ export const storage = {
       map = {};
     }
     if (!map[providerId]) map[providerId] = {};
-    map[providerId][tmdbId] = { episodes, fetchedAt: Date.now() };
+    map[providerId][this._showKey(tmdbId, season)] = { episodes, fetchedAt: Date.now() };
     localStorage.setItem(STORAGE_KEYS.EPISODE_AVAILABILITY, JSON.stringify(map));
   },
 

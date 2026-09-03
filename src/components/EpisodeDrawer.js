@@ -43,7 +43,7 @@ export class EpisodeDrawer {
     const provider = getProviders().find(p => p.id === this.providerId);
     if (!provider || !provider.supportsAvailability) return;
 
-    const episodes = await listAvailableEpisodes(this.providerId, this.media.id);
+    const episodes = await listAvailableEpisodes(this.providerId, this.media.id, this.currentSeason);
     if (!episodes) return;
 
     this.availableEpisodes = new Set(episodes);
