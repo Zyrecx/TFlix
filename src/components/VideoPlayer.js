@@ -13,18 +13,24 @@ import { icon } from '../ui/icons.js';
 import { openServerMenu } from '../ui/serverMenu.js';
 
 export class VideoPlayer {
-  constructor({ media, streamUrl, providerId, subtitles = [], onNextEpisode, onClose, onSwitchToEmbed, onSwitchProvider, onFallback, onWrongMatch }) {
+  constructor({ media, streamUrl, providerId, subtitles = [], nativeMode = false, onNextEpisode, onClose, onSwitchToEmbed, onSwitchProvider, onFallback, onWrongMatch }) {
     this.media = media; // { id, media_type, title, season, episode, ... }
     this.streamUrl = streamUrl;
     this.providerId = providerId || '';
     this.subtitles = subtitles; // array of { label, lang, src }
+    // See PlayerModal.js's nativeMode doc comment — hides every TMDB-anchored
+    // in-player control (server switch, wrong-match, episode drawer,
+    // auto-next-episode) that has no meaning for a single confirmed native item.
+    this.nativeMode = nativeMode;
     this.onNextEpisode = onNextEpisode;
     this.onClose = onClose;
     this.onSwitchToEmbed = onSwitchToEmbed;
     this.onSwitchProvider = onSwitchProvider;
     this.onFallback = onFallback;
     this.onWrongMatch = onWrongMatch;
-    this.providers = getProviders();
+    // Excludes catalogMode: 'native' providers from the switch-server menu —
+    // see docs/PROVIDER_PACKS.md's "Native catalogs" §0.7.
+    this.providers = getProviders().filter(p => p.catalogMode !== 'native');
 
     this.containerEl = null;
     this.videoEl = null;
@@ -82,20 +88,17 @@ export class VideoPlayer {
             </p>
           </div>
           <div class="hud-top-actions">
-            ${isTv ? `
-              <button class="btn btn-secondary btn-sm focusable" id="btn-tv-episodes-drawer" title="Browse Episodes">
-                ${icon('list-video', { size: 16 })}
+            ${!this.nativeMode ? `
+              <button class="btn btn-secondary btn-sm focusable" id="btn-native-server-select" title="Change Server">
+                ${icon('server', { size: 16 })}
               </button>
+            ` : ''}
+            ${isTv && !this.nativeMode ? `
               <button class="btn btn-secondary btn-sm focusable" id="btn-tv-next-ep" title="Next Episode">
                 ${icon('skip-forward', { size: 16 })}
               </button>
-            ` : ''}
-            <button class="btn btn-secondary btn-sm focusable" id="btn-native-server-select" title="Change Server">
-              ${icon('server', { size: 16 })}
-            </button>
-            ${this.currentProviderSupportsFuzzyMatch() ? `
-              <button class="btn btn-secondary btn-sm focusable" id="btn-wrong-match" title="Wrong show or movie? Fix it">
-                ${icon('flag', { size: 16 })}
+              <button class="btn btn-secondary btn-sm focusable" id="btn-tv-episodes-drawer" title="Browse Episodes">
+                ${icon('list-video', { size: 16 })}
               </button>
             ` : ''}
             <button class="btn btn-secondary btn-sm focusable" id="btn-hud-close" title="Exit Player">
@@ -136,6 +139,11 @@ export class VideoPlayer {
               <button class="btn btn-secondary focusable" id="btn-tv-subtitles" title="Subtitles & Audio">
                 ${icon('captions', { size: 16 })} Subtitles
               </button>
+              ${(!this.nativeMode && this.currentProviderSupportsFuzzyMatch()) ? `
+                <button class="btn btn-secondary focusable" id="btn-wrong-match" title="Wrong show or movie? Fix it">
+                  ${icon('flag', { size: 16 })}
+                </button>
+              ` : ''}
             </div>
           </div>
         </div>
@@ -237,7 +245,12 @@ export class VideoPlayer {
     
     const providerName = this.getProviderName();
     console.warn(`[VideoPlayer] Triggering fallback for ${providerName}. Reason: ${reason}`);
-    this.showToast(`${providerName} unavailable (${reason}). Auto-switching server...`, 3000);
+    this.showToast(
+      this.nativeMode
+        ? `${providerName} unavailable (${reason}).`
+        : `${providerName} unavailable (${reason}). Auto-switching server...`,
+      3000
+    );
     
     setTimeout(() => {
       if (this.onFallback) {
@@ -644,12 +657,19 @@ export class VideoPlayer {
     }, duration);
   }
 
+  // See PlayerModal.js's getStorageId() doc comment — a native TV item's
+  // media.id is the episode's own id, not stable across episodes, so
+  // storage keys on nativeShowId instead when present.
+  getStorageId() {
+    return (this.nativeMode && this.media.nativeShowId) ? this.media.nativeShowId : this.media.id;
+  }
+
   checkAndResumeProgress() {
     const isTv = this.media.media_type === 'tv' || this.media.mediaType === 'tv';
     const season = this.media.season || 1;
     const episode = this.media.episode || 1;
 
-    const progress = storage.getProgress(this.media.id, season, episode);
+    const progress = storage.getProgress(this.media.source || 'tmdb', this.getStorageId(), season, episode);
     if (progress && progress.currentTime > 15 && (!progress.duration || progress.currentTime < progress.duration * 0.92)) {
       this.videoEl.currentTime = progress.currentTime;
       this.showToast(`Resumed playback at ${this.formatTime(progress.currentTime)}`, 3500);
@@ -664,14 +684,17 @@ export class VideoPlayer {
       const isTv = this.media.media_type === 'tv' || this.media.mediaType === 'tv';
       const season = this.media.season || 1;
       const episode = this.media.episode || 1;
-      storage.updateProgress(this.media.id, season, episode, currentTime, duration);
+      storage.updateProgress(this.media.source || 'tmdb', this.getStorageId(), season, episode, currentTime, duration);
     }
   }
 
   handlePlaybackEnded() {
     this.saveCurrentProgress();
     const isTv = this.media.media_type === 'tv' || this.media.mediaType === 'tv';
-    if (isTv && this.onNextEpisode) {
+    // Skipped in nativeMode: incrementing `episode` blindly would guess at
+    // the pack's own next-episode id, which isn't guaranteed sequential —
+    // see PlayerModal.js's nativeMode doc comment.
+    if (isTv && this.onNextEpisode && !this.nativeMode) {
       this.startNextEpCountdown();
     }
   }
@@ -902,7 +925,7 @@ export class VideoPlayer {
     }
 
     const isTv = this.media.media_type === 'tv' || this.media.mediaType === 'tv';
-    if (keyCode === TIZEN_KEYS.MEDIA_TRACK_NEXT && isTv) {
+    if (keyCode === TIZEN_KEYS.MEDIA_TRACK_NEXT && isTv && !this.nativeMode) {
       this.triggerNextEpisode();
       return;
     }
@@ -931,24 +954,22 @@ export class VideoPlayer {
     this.activeDrawer.render();
   }
 
+  // A picked episode needs its own resolved stream — reusing `this.streamUrl`
+  // (as an earlier version did) just replayed whatever episode was resolved
+  // when the player first opened. Route through `onNextEpisode`, same as
+  // triggerNextEpisode, so PlayerModal re-resolves a fresh stream for the
+  // chosen season/episode instead of guessing +1.
   switchEpisode(newMedia) {
     this.saveCurrentProgress();
-    this.media = {
-      ...this.media,
-      season: newMedia.season,
-      episode: newMedia.episode,
-      title: newMedia.title
-    };
-
-    const isTv = this.media.media_type === 'tv' || this.media.mediaType === 'tv';
-    const subTitleEl = this.containerEl.querySelector('.hud-sub-title');
-    if (subTitleEl) {
-      subTitleEl.innerHTML = `Season ${newMedia.season} • Episode ${newMedia.episode} <span class="hud-badge-tag">NATIVE TV PLAYER</span>`;
+    this.close();
+    if (this.onNextEpisode) {
+      this.onNextEpisode({
+        ...this.media,
+        season: newMedia.season,
+        episode: newMedia.episode,
+        title: newMedia.title
+      });
     }
-
-    this.showToast(`Playing Season ${newMedia.season} Episode ${newMedia.episode}`, 3000);
-    this.loadStreamSource(this.streamUrl);
-    this.wakeHud();
   }
 
   handleBack() {

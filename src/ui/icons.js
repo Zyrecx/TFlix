@@ -54,6 +54,7 @@ import info from 'lucide-static/icons/info.svg?raw';
 import plugZap from 'lucide-static/icons/plug-zap.svg?raw';
 import keyboard from 'lucide-static/icons/keyboard.svg?raw';
 import flag from 'lucide-static/icons/flag.svg?raw';
+import compass from 'lucide-static/icons/compass.svg?raw';
 
 const RAW_ICONS = {
   home: house, film, tv, bookmark, 'bookmark-plus': bookmarkPlus, 'bookmark-check': bookmarkCheck,
@@ -64,7 +65,7 @@ const RAW_ICONS = {
   check, plus, key, 'list-video': listVideo, 'trash-2': trash2, 'refresh-cw': refreshCw, download,
   'folder-open': folderOpen, server, 'circle-alert': circleAlert, 'triangle-alert': triangleAlert,
   'ellipsis-vertical': ellipsisVertical, 'loader-circle': loaderCircle, eye, 'eye-off': eyeOff,
-  info, 'plug-zap': plugZap, keyboard, flag
+  info, 'plug-zap': plugZap, keyboard, flag, compass
 };
 
 /**

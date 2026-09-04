@@ -118,7 +118,7 @@ export class SearchModal {
             card.setAttribute('tabindex', '0');
 
             const itemTitle = item.title || item.name || 'Untitled';
-            const posterUrl = tmdb.getImageUrl(item.poster_path, 'w500');
+            const posterUrl = tmdb.getImageUrl(item.poster_path, 'w342');
             const year = (item.release_date || item.first_air_date || '').substring(0, 4);
             const type = item.media_type === 'tv' ? 'TV' : 'Movie';
 

@@ -16,9 +16,15 @@
  */
 
 import { storage } from '../store/storage.js';
-import { resolveDirectStream, isRelayAvailable } from './streamScraper.js';
+import {
+  resolveDirectStream, isRelayAvailable, resolveNativeStream,
+  browseNativeCatalog, searchNativeCatalog, getNativeSeasons, listNativeEpisodes
+} from './streamScraper.js';
 
-export { resolveDirectStream, isRelayAvailable };
+export {
+  resolveDirectStream, isRelayAvailable, resolveNativeStream,
+  browseNativeCatalog, searchNativeCatalog, getNativeSeasons, listNativeEpisodes
+};
 
 const RELAY_BASE = 'http://127.0.0.1:47993';
 
@@ -51,7 +57,15 @@ export async function refreshRelayProviders() {
       // gates the "wrong match?" control, supportsAvailability gates
       // episode-availability badges (streamScraper.js's listAvailableEpisodes).
       fuzzyMatch: Boolean(p.fuzzyMatch),
-      supportsAvailability: Boolean(p.supportsAvailability)
+      supportsAvailability: Boolean(p.supportsAvailability),
+      // See docs/PROVIDER_PACKS.md's "Native catalogs" section — a
+      // catalogMode: 'native' provider is only ever resolved from the
+      // dedicated native browse flow, never TMDB-flow rotation (see
+      // getPrioritizedProviders/getProviderById below).
+      catalogMode: p.catalogMode || 'tmdb',
+      catalogTypes: p.catalogTypes || [],
+      catalogCategories: p.catalogCategories || [],
+      disableTmdbArtFallback: Boolean(p.disableTmdbArtFallback)
     }));
     relayPacks = data.packs || [];
     return true;
@@ -164,19 +178,37 @@ export function getProviders() {
 }
 
 /**
- * Get provider definition by ID
+ * Native-catalog providers only — a provider with its own browsable
+ * categories/search/episodes, surfaced through the dedicated Providers tab
+ * rather than TMDB-driven browsing. See docs/PROVIDER_PACKS.md.
+ */
+export function getNativeCatalogProviders() {
+  return relayProviders.filter(p => p.catalogMode === 'native');
+}
+
+/**
+ * Get provider definition by ID. The list[0] fallback (used when a
+ * requested id isn't registered) must skip native-catalog providers —
+ * relayProviders lists them first, so an unmatched TMDB-flow lookup could
+ * otherwise silently hand back a provider whose resolve() only understands
+ * ctx.native calls (see docs/PROVIDER_PACKS.md's "Native catalogs" section).
  */
 export function getProviderById(providerId) {
   const list = getProviders();
   if (list.length === 0) return null;
-  return list.find(p => p.id === providerId) || list[0];
+  const exact = list.find(p => p.id === providerId);
+  if (exact) return exact;
+  return list.find(p => p.catalogMode !== 'native') || null;
 }
 
 /**
- * Retrieve providers sorted with direct HLS providers first (unless a specific preferred provider is requested)
+ * Retrieve providers sorted with direct HLS providers first (unless a specific preferred provider is requested).
+ * Excludes catalogMode: 'native' providers entirely — they're only ever
+ * resolved from the dedicated native browse flow with ctx.native: true, not
+ * ordinary TMDB-driven playback/fallback rotation.
  */
 export function getPrioritizedProviders(preferredId) {
-  const list = getProviders();
+  const list = getProviders().filter(p => p.catalogMode !== 'native');
   if (list.length === 0) return [];
 
   if (preferredId) {

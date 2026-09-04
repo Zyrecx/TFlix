@@ -136,17 +136,24 @@ class SpatialNavigationManager {
     const candidates = Array.from(root.querySelectorAll(
       'button, a, input, select, textarea, [tabindex="0"], .focusable'
     ));
+    return candidates.filter(el => this.isVisibleFocusable(el));
+  }
 
-    return candidates.filter(el => {
-      if (el.disabled || el.getAttribute('aria-hidden') === 'true' || el.getAttribute('tabindex') === '-1') return false;
-      if (el.offsetParent === null && window.getComputedStyle(el).position !== 'fixed') return false;
-      const style = window.getComputedStyle(el);
-      // For elements inside active scope, allow them if not display:none or visibility:hidden
-      if (this.activeScope && this.activeScope.contains(el)) {
-        return style.display !== 'none' && style.visibility !== 'hidden';
-      }
-      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
-    });
+  // Split out of getFocusableElements so navigate() can run it only on the
+  // handful of candidates that already passed a cheap direction/rect filter,
+  // instead of on every focusable element in scope on every keypress — this
+  // does a getComputedStyle read, which is materially more expensive than
+  // getBoundingClientRect, and scope sizes grow unbounded on screens like
+  // ProviderBrowseScreen (Load more just keeps appending items).
+  isVisibleFocusable(el) {
+    if (el.disabled || el.getAttribute('aria-hidden') === 'true' || el.getAttribute('tabindex') === '-1') return false;
+    if (el.offsetParent === null && window.getComputedStyle(el).position !== 'fixed') return false;
+    const style = window.getComputedStyle(el);
+    // For elements inside active scope, allow them if not display:none or visibility:hidden
+    if (this.activeScope && this.activeScope.contains(el)) {
+      return style.display !== 'none' && style.visibility !== 'hidden';
+    }
+    return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
   }
 
   focusFirstAvailable() {
@@ -193,10 +200,16 @@ class SpatialNavigationManager {
       });
     }
 
-    // Dispatch custom event for HUD/dev tools
-    window.dispatchEvent(new CustomEvent('tflix:focuschange', {
-      detail: { element, text: element.innerText || element.getAttribute('aria-label') || element.tagName }
-    }));
+    // Dispatch custom event for HUD/dev tools. `text` reads `element.innerText`,
+    // which forces a layout — only worth paying for if something actually
+    // listens (the dev HUD; not present in production), so it's a lazy
+    // getter rather than computed unconditionally on every focus move.
+    const detail = { element };
+    Object.defineProperty(detail, 'text', {
+      enumerable: true,
+      get: () => element.innerText || element.getAttribute('aria-label') || element.tagName
+    });
+    window.dispatchEvent(new CustomEvent('tflix:focuschange', { detail }));
   }
 
   handleFocusIn(e) {
@@ -423,11 +436,16 @@ class SpatialNavigationManager {
   }
 
   navigate(direction) {
-    const focusables = this.getFocusableElements();
-    if (focusables.length === 0) return;
+    const root = this.activeScope || document.body;
+    // Raw, unfiltered candidate list — cheap (no getComputedStyle yet).
+    const rawCandidates = Array.from(root.querySelectorAll(
+      'button, a, input, select, textarea, [tabindex="0"], .focusable'
+    ));
+    if (rawCandidates.length === 0) return;
 
-    if (!this.currentFocusedElement || !focusables.includes(this.currentFocusedElement)) {
-      this.setFocus(focusables[0]);
+    if (!this.currentFocusedElement || !rawCandidates.includes(this.currentFocusedElement)) {
+      const focusables = rawCandidates.filter(el => this.isVisibleFocusable(el));
+      if (focusables.length > 0) this.setFocus(focusables[0]);
       return;
     }
 
@@ -443,16 +461,14 @@ class SpatialNavigationManager {
     const overrideKey = 'nav' + direction.charAt(0) + direction.slice(1).toLowerCase();
     const overrideSelector = this.currentFocusedElement.dataset[overrideKey];
     if (overrideSelector) {
-      const root = this.activeScope || document;
       const overrideEl = root.querySelector(overrideSelector);
-      if (overrideEl && focusables.includes(overrideEl)) {
+      if (overrideEl && rawCandidates.includes(overrideEl) && this.isVisibleFocusable(overrideEl)) {
         this.setFocus(overrideEl);
         return;
       }
     }
 
     const currentRect = this.currentFocusedElement.getBoundingClientRect();
-    const candidates = focusables.filter(el => el !== this.currentFocusedElement);
 
     // UP/DOWN moves within a column (the sidebar's own list, or a card
     // grid's columns) require actual overlap on the perpendicular axis — a
@@ -470,14 +486,26 @@ class SpatialNavigationManager {
     // instead of just landing on the nearest reasonable target.
     const requireOverlap = direction === 'UP' || direction === 'DOWN';
 
+    // Cheap geometry-only pass first: getBoundingClientRect is far cheaper
+    // than getComputedStyle, so this narrows a possibly large (and, on
+    // screens like ProviderBrowseScreen, unbounded) candidate list down to
+    // just the ones actually in the pressed direction before any of them
+    // pay for a visibility/style check.
+    const inDirection = [];
+    for (const el of rawCandidates) {
+      if (el === this.currentFocusedElement) continue;
+      const rect = el.getBoundingClientRect();
+      if (this.isInDirection(currentRect, rect, direction)) {
+        inDirection.push({ el, rect });
+      }
+    }
+
     let bestCandidate = null;
     let bestHasOverlap = false;
     let shortestDistance = Infinity;
 
-    for (const candidate of candidates) {
-      const targetRect = candidate.getBoundingClientRect();
-
-      if (!this.isInDirection(currentRect, targetRect, direction)) {
+    for (const { el: candidate, rect: targetRect } of inDirection) {
+      if (!this.isVisibleFocusable(candidate)) {
         continue;
       }
 

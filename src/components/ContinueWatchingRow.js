@@ -47,7 +47,7 @@ export function createContinueWatchingRow({ items, onItemSelect, onChanged }) {
       card.setAttribute('data-hold', '1');
 
       const itemTitle = item.title || item.name || 'Untitled';
-      const posterUrl = tmdb.getImageUrl(item.poster_path, 'w500');
+      const posterUrl = tmdb.getImageUrl(item.poster_path, 'w342');
       const isTv = item.media_type === 'tv' || item.mediaType === 'tv';
       const epBadge = isTv && item.season && item.episode ? `S${item.season} E${item.episode}` : '';
       const timeLabel = formatRemaining(item);
@@ -109,7 +109,7 @@ export function createContinueWatchingRow({ items, onItemSelect, onChanged }) {
       onItemSelect(item);
     });
     overlay.querySelector('#cw-ctx-remove').addEventListener('click', () => {
-      storage.removeFromHistory(item.id);
+      storage.removeFromHistory(item.source || 'tmdb', item.id);
       close();
       renderCards();
       if (onChanged) onChanged();

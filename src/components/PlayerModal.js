@@ -1,5 +1,5 @@
 import { getProviders, getProviderById, getPrioritizedProviders, getNextFallbackProvider, getEmbedUrl, isDirectProvider } from '../api/providers.js';
-import { resolveDirectStream } from '../api/streamScraper.js';
+import { resolveDirectStream, resolveNativeStream } from '../api/streamScraper.js';
 import { storage } from '../store/storage.js';
 import { nav, TIZEN_KEYS } from '../nav/spatialNav.js';
 import { VideoPlayer } from './VideoPlayer.js';
@@ -8,11 +8,19 @@ import { icon } from '../ui/icons.js';
 import { openServerMenu } from '../ui/serverMenu.js';
 
 export class PlayerModal {
-  constructor({ media, onClose, onNextEpisode }) {
+  // nativeMode: true means `media` came from ProviderBrowseScreen (see
+  // NATIVE_CATALOG_PLAN.md §5 phase 4) — media.id is the pack's own native
+  // id (not a TMDB id) and media.source is pinned to that one provider.
+  // Disables fallback rotation, the multi-provider attemptedProviders UI,
+  // and every TMDB-anchored feature (confirm-match, episode drawer,
+  // auto-next-episode, server switching) that has no meaning for a single
+  // already-confirmed native item.
+  constructor({ media, onClose, onNextEpisode, nativeMode = false }) {
     this.media = media; // { id, media_type, title, season, episode, poster_path, backdrop_path, vote_average, imdb_id }
     this.onClose = onClose;
     this.onNextEpisode = onNextEpisode;
-    this.currentProviderId = storage.getDefaultProvider();
+    this.nativeMode = nativeMode;
+    this.currentProviderId = nativeMode ? (media.source || '') : storage.getDefaultProvider();
     this.activePlayerInstance = null;
     this.activeDrawer = null;
     this.playerEl = null;
@@ -22,6 +30,7 @@ export class PlayerModal {
     this.postMessageListener = null;
     this.attemptedProviders = new Set();
     this.hasPlaybackStarted = false;
+    this.lastEmbedProgressSaveAt = 0;
 
     this.backHandler = this.close.bind(this);
     this.mediaKeyHandler = this.handleMediaKey.bind(this);
@@ -29,6 +38,11 @@ export class PlayerModal {
   }
 
   render() {
+    if (this.nativeMode) {
+      this.renderNativePlayer();
+      return this.activePlayerInstance ? this.activePlayerInstance.containerEl : null;
+    }
+
     const providers = getPrioritizedProviders(this.currentProviderId);
     if (providers.length === 0) {
       this.playerEl = document.createElement('div');
@@ -71,9 +85,11 @@ export class PlayerModal {
       let subtitles = [];
 
       if (!resolvedStreamUrl) {
-        const resolved = await resolveDirectStream(this.currentProviderId, this.media, season, episode, null, forceConfirm);
+        const resolved = this.nativeMode
+          ? await resolveNativeStream(this.currentProviderId, this.media.id, isTv, season, episode)
+          : await resolveDirectStream(this.currentProviderId, this.media, season, episode, null, forceConfirm);
 
-        if (resolved && resolved.needsConfirmation) {
+        if (!this.nativeMode && resolved && resolved.needsConfirmation) {
           this.renderConfirmMatchView(resolved.candidates, resolved.providerName);
           return;
         }
@@ -109,6 +125,7 @@ export class PlayerModal {
         streamUrl: resolvedStreamUrl,
         providerId: this.currentProviderId,
         subtitles,
+        nativeMode: this.nativeMode,
         onNextEpisode: (nextMedia) => {
           if (this.onNextEpisode) {
             this.onNextEpisode(nextMedia);
@@ -118,24 +135,83 @@ export class PlayerModal {
           if (this.onClose) this.onClose();
         },
         onSwitchToEmbed: (providerId) => {
-          this.handleFallback(this.currentProviderId, 'Stream error');
+          if (!this.nativeMode) this.handleFallback(this.currentProviderId, 'Stream error');
         },
         onSwitchProvider: (newProviderId) => {
-          this.switchServer(newProviderId);
+          if (!this.nativeMode) this.switchServer(newProviderId);
         },
         onFallback: (failedId, reason) => {
-          this.handleFallback(failedId, reason);
+          if (this.nativeMode) {
+            this.renderNativePlaybackFailedView(reason);
+          } else {
+            this.handleFallback(failedId, reason);
+          }
         },
         onWrongMatch: () => {
-          this.reconfirmMatch();
+          if (!this.nativeMode) this.reconfirmMatch();
         }
       });
 
       this.activePlayerInstance.render();
     } catch (err) {
       console.warn(`[PlayerModal] Native stream resolution error on ${this.currentProviderId}:`, err);
-      this.handleFallback(this.currentProviderId, err.message || 'Stream resolution failed');
+      if (this.nativeMode) {
+        this.renderNativePlaybackFailedView(err.message || 'Stream resolution failed');
+      } else {
+        this.handleFallback(this.currentProviderId, err.message || 'Stream resolution failed');
+      }
     }
+  }
+
+  // nativeMode's equivalent of renderAllServersFailedView — there is only
+  // ever one provider in this flow (no rotation), so this offers Retry/Exit
+  // without any "all servers" framing.
+  renderNativePlaybackFailedView(reason = '') {
+    if (this.activePlayerInstance) {
+      this.activePlayerInstance.close();
+      this.activePlayerInstance = null;
+    }
+    if (this.playerEl && this.playerEl.parentNode) {
+      nav.clearScope(this.playerEl);
+      this.playerEl.parentNode.removeChild(this.playerEl);
+    }
+
+    this.playerEl = document.createElement('div');
+    this.playerEl.className = 'player-screen';
+    this.playerEl.innerHTML = `
+      <div class="player-hud" style="opacity: 1; pointer-events: all; transform: none; background: rgba(10,10,15,0.97); position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1000;">
+        <div style="max-width: 600px; text-align: center; padding: 40px; background: #181824; border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.9);">
+          <div style="margin-bottom: 16px; color: #ef4444; display: flex; justify-content: center;">${icon('triangle-alert', { size: 50 })}</div>
+          <h2 style="color: #fff; font-size: 24px; font-weight: 800; margin-bottom: 12px;">Playback Failed</h2>
+          <p style="color: #a1a1aa; font-size: 15px; line-height: 1.5; margin-bottom: 8px;">
+            ${this.getProviderName(this.currentProviderId)} couldn't play this title.
+          </p>
+          ${reason ? `<div style="color: #f87171; font-size: 13px; font-family: monospace; margin-bottom: 24px;">${reason}</div>` : '<div style="margin-bottom: 24px;"></div>'}
+          <div style="display: flex; gap: 14px; justify-content: center; flex-wrap: wrap;">
+            <button class="btn btn-primary focusable primary-focus" id="btn-retry-native" style="padding: 12px 24px; font-size: 15px;">
+              ${icon('rotate-ccw')} Retry
+            </button>
+            <button class="btn btn-secondary focusable" id="btn-native-failed-exit" style="padding: 12px 20px; font-size: 15px;">
+              ${icon('x')} Exit Player
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(this.playerEl);
+    nav.setScope(this.playerEl);
+    nav.pushBackHandler(this.backHandler);
+
+    this.playerEl.querySelector('#btn-retry-native').addEventListener('click', () => {
+      nav.clearScope(this.playerEl);
+      if (this.playerEl.parentNode) {
+        this.playerEl.parentNode.removeChild(this.playerEl);
+        this.playerEl = null;
+      }
+      this.renderNativePlayer();
+    });
+    this.playerEl.querySelector('#btn-native-failed-exit').addEventListener('click', () => this.close());
   }
 
   renderLoadingView(title = 'Connecting to Stream...', subtitle = 'Resolving media sources') {
@@ -264,7 +340,9 @@ export class PlayerModal {
 
   skipToNextServer() {
     clearTimeout(this.embedTimeoutTimer);
-    const providers = getProviders();
+    // Excludes catalogMode: 'native' providers — this modal is always in the
+    // TMDB-driven flow; see docs/PROVIDER_PACKS.md's "Native catalogs" §0.7.
+    const providers = getProviders().filter(p => p.catalogMode !== 'native');
     const currentIndex = providers.findIndex(p => p.id === this.currentProviderId);
     const nextIndex = (currentIndex + 1) % providers.length;
     const nextProvider = providers[nextIndex];
@@ -352,6 +430,16 @@ export class PlayerModal {
     cancelBtn.addEventListener('click', () => this.close());
   }
 
+  // A native TV item's `media.id` is the specific episode's own id (what
+  // resolveNativeStream needs) — not stable across episodes of the same
+  // show. Storage/history must key on `nativeShowId` instead so watching
+  // episode after episode advances one Continue Watching row rather than
+  // creating a new one per episode. See ProviderBrowseScreen.js's
+  // attachPlayHandler doc comment.
+  getStorageId() {
+    return (this.nativeMode && this.media.nativeShowId) ? this.media.nativeShowId : this.media.id;
+  }
+
   recordInitialHistory() {
     const isTv = this.media.media_type === 'tv' || this.media.mediaType === 'tv';
     const season = this.media.season || 1;
@@ -359,7 +447,8 @@ export class PlayerModal {
     const title = this.media.title || this.media.name || 'Playing Media';
 
     storage.saveHistory({
-      id: this.media.id,
+      id: this.getStorageId(),
+      source: this.media.source || 'tmdb',
       media_type: isTv ? 'tv' : 'movie',
       mediaType: isTv ? 'tv' : 'movie',
       title,
@@ -383,13 +472,15 @@ export class PlayerModal {
     this.attemptedProviders.add(this.currentProviderId);
     this.recordInitialHistory();
 
-    const providers = getProviders();
-    if (!this.currentProviderId || !providers.some(p => p.id === this.currentProviderId)) {
+    // Excludes catalogMode: 'native' providers — this is the TMDB-driven
+    // embed-playback path; see docs/PROVIDER_PACKS.md's "Native catalogs" §0.7.
+    const providers = getProviders().filter(p => p.catalogMode !== 'native');
+    if (!this.nativeMode && (!this.currentProviderId || !providers.some(p => p.id === this.currentProviderId))) {
       this.currentProviderId = storage.getDefaultProvider() || (providers[0] ? providers[0].id : '');
     }
 
     // Check saved progress to resume via startAt parameter if supported
-    const saved = storage.getProgress(this.media.id, season, episode);
+    const saved = storage.getProgress(this.media.source || 'tmdb', this.getStorageId(), season, episode);
     const startAt = saved && saved.currentTime > 15 ? saved.currentTime : 0;
 
     // overrideUrl: a "direct" provider that resolved to { embedUrl } instead
@@ -412,13 +503,15 @@ export class PlayerModal {
           </p>
         </div>
         <div class="player-controls">
-          <button class="btn btn-secondary focusable primary-focus" id="player-skip-server-btn" style="padding: 8px 16px; font-size: 14px;" title="Skip to Next Working Server">
-            ${icon('zap', { size: 16 })} Next Server
-          </button>
-          <button class="btn btn-secondary focusable" id="player-server-select" style="padding: 8px 16px; font-size: 14px;" title="Change Server">
-            ${icon('server', { size: 16 })}
-          </button>
-          ${isTv ? `
+          ${!this.nativeMode ? `
+            <button class="btn btn-secondary focusable primary-focus" id="player-skip-server-btn" style="padding: 8px 16px; font-size: 14px;" title="Skip to Next Working Server">
+              ${icon('zap', { size: 16 })} Next Server
+            </button>
+            <button class="btn btn-secondary focusable" id="player-server-select" style="padding: 8px 16px; font-size: 14px;" title="Change Server">
+              ${icon('server', { size: 16 })}
+            </button>
+          ` : ''}
+          ${isTv && !this.nativeMode ? `
             <button class="btn btn-secondary focusable" id="player-episodes-drawer-btn" style="padding: 8px 18px; font-size: 14px;" title="Browse Episodes">
               ${icon('list-video', { size: 16 })}
             </button>
@@ -426,7 +519,7 @@ export class PlayerModal {
               ${icon('skip-forward', { size: 16 })}
             </button>
           ` : ''}
-          <button class="btn btn-secondary focusable" id="player-close-btn" style="padding: 8px 18px; font-size: 14px;" title="Exit Player">
+          <button class="btn btn-secondary focusable ${this.nativeMode ? 'primary-focus' : ''}" id="player-close-btn" style="padding: 8px 18px; font-size: 14px;" title="Exit Player">
             ${icon('x', { size: 16 })}
           </button>
         </div>
@@ -580,8 +673,16 @@ export class PlayerModal {
             if (data.type === 'PLAYER_EVENT' || data.event === 'timeupdate' || typeof data.currentTime === 'number') {
               const cur = data.currentTime || (data.data && data.data.currentTime);
               const dur = data.duration || (data.data && data.data.duration);
-              if (typeof cur === 'number' && cur > 5) {
-                storage.updateProgress(this.media.id, season, episode, cur, dur);
+              // Throttled the same way VideoPlayer.js's native-player path
+              // saves progress (a 3s setInterval there) — VidLink can post
+              // timeupdate messages far more often than that, and each save
+              // is a synchronous localStorage read+write of the whole
+              // history list, which is main-thread work best not repeated
+              // several times a second during playback.
+              const now = Date.now();
+              if (typeof cur === 'number' && cur > 5 && now - this.lastEmbedProgressSaveAt >= 3000) {
+                this.lastEmbedProgressSaveAt = now;
+                storage.updateProgress(this.media.source || 'tmdb', this.getStorageId(), season, episode, cur, dur);
               }
             }
             // Auto advance next episode on ended

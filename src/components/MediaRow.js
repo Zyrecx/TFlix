@@ -24,7 +24,7 @@ export function createMediaRow({ title, items, icon = 'film', onItemSelect }) {
     card.setAttribute('tabindex', '0');
 
     const itemTitle = item.title || item.name || 'Untitled';
-    const posterUrl = tmdb.getImageUrl(item.poster_path, 'w500');
+    const posterUrl = tmdb.getImageUrl(item.poster_path, 'w342');
     const isTv = item.media_type === 'tv' || item.mediaType === 'tv';
     const year = (item.release_date || item.first_air_date || '').substring(0, 4);
     const rating = item.vote_average ? item.vote_average.toFixed(1) : '';

@@ -38,6 +38,47 @@ function setInCache(key, data, ttlMs) {
   });
 }
 
+// Persisted mirror of FEED-tier entries only (trending/popular/top-rated/
+// by-genre — the rows the home screen needs before it can paint anything).
+// The in-memory apiCache above is intentionally cleared on every reload; on
+// a TV, "reload" also means "app was killed and relaunched", which happens
+// far more often than on a desktop tab, so without this every cold start
+// re-fetched the whole home screen from TMDB before showing anything. TTL
+// stays the same 5 minutes — this only lets an already-fresh response
+// survive a relaunch, it doesn't extend how long data is trusted.
+const FEED_STORAGE_KEY = 'tflix_tmdb_feed_cache';
+const MAX_PERSISTED_FEED_ENTRIES = 40;
+
+function loadPersistedFeedCache() {
+  try {
+    return JSON.parse(localStorage.getItem(FEED_STORAGE_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function getFromPersistedFeedCache(key) {
+  const map = loadPersistedFeedCache();
+  const entry = map[key];
+  if (!entry || Date.now() > entry.expiresAt) return null;
+  return entry.data;
+}
+
+function setInPersistedFeedCache(key, data, ttlMs) {
+  const map = loadPersistedFeedCache();
+  map[key] = { data, expiresAt: Date.now() + ttlMs };
+  const keys = Object.keys(map);
+  if (keys.length > MAX_PERSISTED_FEED_ENTRIES) {
+    keys.sort((a, b) => map[a].expiresAt - map[b].expiresAt);
+    for (let i = 0; i < keys.length - MAX_PERSISTED_FEED_ENTRIES; i++) delete map[keys[i]];
+  }
+  try {
+    localStorage.setItem(FEED_STORAGE_KEY, JSON.stringify(map));
+  } catch (e) {
+    // Storage full/unavailable — persistence is a nice-to-have, not required.
+  }
+}
+
 /**
  * Generic TMDB fetch wrapper with optional in-memory TTL caching
  */
@@ -52,6 +93,13 @@ async function tmdbFetch(endpoint, params = {}, ttlMs = 0) {
     const cached = getFromCache(cacheKey);
     if (cached) {
       return cached;
+    }
+    if (ttlMs === TTL.FEED) {
+      const persisted = getFromPersistedFeedCache(cacheKey);
+      if (persisted) {
+        setInCache(cacheKey, persisted, ttlMs); // warm the in-memory cache too
+        return persisted;
+      }
     }
   }
 
@@ -74,6 +122,9 @@ async function tmdbFetch(endpoint, params = {}, ttlMs = 0) {
 
   if (ttlMs > 0) {
     setInCache(cacheKey, data, ttlMs);
+    if (ttlMs === TTL.FEED) {
+      setInPersistedFeedCache(cacheKey, data, ttlMs);
+    }
   }
 
   return data;
@@ -82,15 +133,28 @@ async function tmdbFetch(endpoint, params = {}, ttlMs = 0) {
 export const tmdb = {
   clearCache() {
     apiCache.clear();
+    try {
+      localStorage.removeItem(FEED_STORAGE_KEY);
+    } catch (e) {
+      // ignore
+    }
   },
 
-  getImageUrl(path, size = 'w500') {
-    if (!path) return 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="500" height="750" fill="%231a1a1a"><rect width="100%" height="100%"/><text x="50%" y="50%" fill="%23666" font-size="20" font-family="sans-serif" text-anchor="middle" dy=".3em">No Image</text></svg>';
+  getImageUrl(path, size = 'w342') {
+    // Single quotes inside the SVG markup, not double — this is embedded
+    // directly into HTML as `<img src="${posterUrl}">` all over the app
+    // (MediaRow.js, etc), and a literal `"` here would prematurely close
+    // that attribute (verified live: it truncated at `xmlns="`, breaking
+    // the image, once native-catalog items with no poster made this path
+    // common instead of rare).
+    if (!path) return "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='500' height='750' fill='%231a1a1a'><rect width='100%' height='100%'/><text x='50%' y='50%' fill='%23666' font-size='20' font-family='sans-serif' text-anchor='middle' dy='.3em'>No Image</text></svg>";
+    if (/^https?:\/\//.test(path)) return path;
     return `${IMAGE_BASE_URL}/${size}${path}`;
   },
 
   getBackdropUrl(path, size = 'w1280') {
     if (!path) return '';
+    if (/^https?:\/\//.test(path)) return path;
     return `${IMAGE_BASE_URL}/${size}${path}`;
   },
 

@@ -141,6 +141,92 @@ before reaching the actual host. A resolver for a source like that typically:
    rather than resolve the wrong episode — TFlix falls back to the next
    provider automatically.
 
+### Native catalogs (anime/dub sites with their own browse structure)
+
+A source with its own categories, search, and season/episode structure that
+doesn't map cleanly onto TMDB (fuzzy title-matching plus season/episode-number
+conversion produces wrong matches — "wrong season" is a real pain point) can
+opt into **native-catalog mode** instead of being a pure TMDB-id resolver.
+A native provider gets a dedicated per-provider browse screen in the app;
+playback launched from it bypasses TMDB-anchored matching entirely.
+
+All of the following are properties on the same `module.exports` object as
+`resolve()`/`fuzzyMatch`/etc — nothing changes in `manifest.json`. Omit all of
+them (or set `catalogMode: 'tmdb'`) for a normal pack — zero behavior change.
+
+```js
+module.exports = {
+  id: 'example-native',
+  // ... resolve()/etc ...
+
+  catalogMode: 'native', // 'tmdb' (default) | 'native'
+
+  // Which content types this source actually has — required for
+  // catalogMode: 'native' so the browse screen doesn't imply completeness
+  // the source doesn't have.
+  catalogTypes: ['tv'], // subset of ['movie', 'tv']
+
+  // Opt out of the app's generic TMDB-art-match fallback for this pack's
+  // items (e.g. mismatch risk judged too high). Only meaningful alongside
+  // catalogMode: 'native'.
+  disableTmdbArtFallback: false,
+
+  // Declares the browse screen's category tabs, in display order. Required
+  // for catalogMode: 'native'.
+  catalogCategories: [
+    { id: 'latest', label: 'Latest' },
+    { id: 'movies', label: 'Movies' }
+  ],
+
+  // One page of this source's own catalog for a category id from
+  // catalogCategories above. `id` is this pack's own internal id for the
+  // item — stable across calls, threaded back as ctx.confirmedShowId on
+  // playback. `poster`, if present, must be a full absolute URL (the app
+  // passes it through its image-URL helper unmodified); omit/null if the
+  // source has none — the app's art-fallback chain takes over.
+  // Returns: { items: [ { id, title, year?, poster?, type: 'movie'|'tv' } ],
+  //            hasMore: boolean }
+  async listCatalog(category, page, http) { /* ... */ },
+
+  // Text search against this source's own catalog — feeds the
+  // per-provider search box, NOT merged into TFlix's global TMDB search.
+  // Same item shape as listCatalog, no pagination (best N results, e.g.
+  // capped ~30). Required for catalogMode: 'native'.
+  // Returns: { items: [...] }
+  async search(query, http) { /* ... */ },
+
+  // Optional. Only needed if a native 'tv' item has its own season
+  // structure the browse screen should let the user pick before episodes.
+  // Many dub/anime sites flatten everything to one continuous episode list
+  // instead — in that case omit this; the browse screen treats "no
+  // seasons" as "go straight to listNativeEpisodes".
+  // nativeId is the id from listCatalog/search.
+  // Returns: { seasons: [ { id, label } ] }
+  async getSeasons(nativeId, http) { /* ... */ },
+
+  // Required for catalogMode: 'native' when catalogTypes includes 'tv'.
+  // Distinct from supportsAvailability/listEpisodes above — this returns
+  // real episode metadata for browsing, not a badge-only bare-number list.
+  // seasonId is null when getSeasons is unused. `id` here flows into
+  // ctx.confirmedShowId when the user picks an episode. `number` is this
+  // pack's own native episode number — may be continuous/absolute, may not
+  // match TMDB at all, and that's fine; TMDB is not in this loop.
+  // Returns: { episodes: [ { id, number, title?, thumb? } ] }
+  async listNativeEpisodes(nativeId, seasonId, http) { /* ... */ }
+};
+```
+
+**`resolve()` contract addition:** when called from the native browse flow,
+`ctx` is `{ native: true, confirmedShowId: <chosen id>, season, episode, isTv,
+... }` with `tmdbId`/`imdbId`/`title`/`year` blank/absent — there may be no
+TMDB match at all. A `catalogMode: 'native'` pack's `resolve()` should treat
+`ctx.native` as sufficient input and skip any TMDB-anchored matching or
+season-length-sum conversion entirely (`season`/`episode` here are already
+the source's own native numbers). A `catalogMode: 'tmdb'` (default) pack
+never receives `ctx.native: true` — the app excludes native providers from
+ordinary TMDB-flow rotation entirely, so this only ever happens from the
+native browse flow, explicitly.
+
 ### A note on episode numbering
 
 `ctx.season`/`ctx.episode` are TMDB's numbers, which for most shows means
@@ -167,6 +253,54 @@ needs one.
 Host both files at a public HTTP(S) URL (a GitHub raw URL, a Gist, your own
 server/Worker) and point TFlix at the manifest's URL — either paste it into
 `Settings → Custom Provider Repository URL` or hand it out as a pairing QR.
+
+### Sharing code across providers in one pack
+
+If a pack has several providers that all embed the same handful of video
+hosts (common — most streaming sites are a thin catalog/search layer wrapped
+around a small, reused set of hosting services), duplicate host-extraction
+logic in every provider file is a maintenance trap. Add a `"shared"` array
+to the manifest naming plain files that get installed into the pack's own
+directory unvalidated (no `id`/`resolve` required) so provider files can
+`require()` them like normal sibling modules:
+
+```json
+{
+  "name": "My Example Pack",
+  "shared": ["hosts.js"],
+  "providers": [
+    { "id": "example-site", "file": "example-site.js" }
+  ]
+}
+```
+
+```js
+// hosts.js — not a provider itself, just exports helpers
+module.exports = {
+  async extractVoe(pageUrl, http) { /* ... */ },
+  async extractDoodstream(pageUrl, http) { /* ... */ }
+};
+```
+
+```js
+// example-site.js
+var hosts = require('./hosts');
+module.exports = {
+  id: 'example-site',
+  // ...
+  async resolve(ctx, http) {
+    // ... find the embed URL, then:
+    return hosts.extractVoe(embedUrl, http);
+  }
+};
+```
+
+This works because provider files (unlike `hlsRelay.js` itself) are written
+to real files on disk and loaded with real `require()` — sibling requires
+are fine at that layer. `shared` files are fetched/installed the same way
+providers are (relative to the manifest URL) but skip the provider-shape
+check, and are safe to sit alongside real providers since the loader already
+ignores any `.js` file in a pack directory that doesn't export `{id, resolve}`.
 
 ## 3. (Optional) Listing it in a catalog
 

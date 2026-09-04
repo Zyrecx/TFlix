@@ -100,6 +100,16 @@ export const storage = {
     localStorage.setItem(STORAGE_KEYS.DEFAULT_PROVIDER, providerId);
   },
 
+  // Composite identity for anything id-keyed (watchlist/history dedup and
+  // lookup). A bare `id` is no longer sufficient once a native-catalog
+  // provider's own id space exists alongside TMDB's — the two could
+  // theoretically collide. `source` is `'tmdb'` for every existing/TMDB-flow
+  // record, or a providerId for a native item (see docs/PROVIDER_PACKS.md's
+  // "Native catalogs" section).
+  _itemKey(source, id) {
+    return `${source}:${id}`;
+  },
+
   getWatchlist() {
     try {
       const items = JSON.parse(localStorage.getItem(STORAGE_KEYS.WATCHLIST) || '[]');
@@ -108,7 +118,8 @@ export const storage = {
         return {
           ...item,
           media_type: mediaType,
-          mediaType: mediaType
+          mediaType: mediaType,
+          source: item.source || 'tmdb'
         };
       });
     } catch {
@@ -118,10 +129,12 @@ export const storage = {
 
   addToWatchlist(item) {
     const list = this.getWatchlist();
-    if (!list.some(i => i.id === item.id)) {
+    const source = item.source || 'tmdb';
+    if (!list.some(i => this._itemKey(i.source, i.id) === this._itemKey(source, item.id))) {
       const mediaType = item.media_type || item.mediaType || (item.first_air_date ? 'tv' : 'movie');
       list.unshift({
         id: item.id,
+        source,
         media_type: mediaType,
         mediaType: mediaType,
         title: item.title || item.name,
@@ -137,13 +150,13 @@ export const storage = {
     }
   },
 
-  removeFromWatchlist(id) {
-    const list = this.getWatchlist().filter(i => i.id !== id);
+  removeFromWatchlist(source, id) {
+    const list = this.getWatchlist().filter(i => this._itemKey(i.source, i.id) !== this._itemKey(source, id));
     localStorage.setItem(STORAGE_KEYS.WATCHLIST, JSON.stringify(list));
   },
 
-  isInWatchlist(id) {
-    return this.getWatchlist().some(i => i.id === id);
+  isInWatchlist(source, id) {
+    return this.getWatchlist().some(i => this._itemKey(i.source, i.id) === this._itemKey(source, id));
   },
 
   getHistory() {
@@ -154,7 +167,8 @@ export const storage = {
         return {
           ...item,
           media_type: mediaType,
-          mediaType: mediaType
+          mediaType: mediaType,
+          source: item.source || 'tmdb'
         };
       });
     } catch {
@@ -163,9 +177,10 @@ export const storage = {
   },
 
   saveHistory(item) {
+    const source = item.source || 'tmdb';
     const mediaType = item.media_type || item.mediaType || (item.first_air_date ? 'tv' : 'movie');
-    const list = this.getHistory().filter(i => i.id !== item.id);
-    const existing = this.getHistory().find(i => i.id === item.id);
+    const list = this.getHistory().filter(i => this._itemKey(i.source, i.id) !== this._itemKey(source, item.id));
+    const existing = this.getHistory().find(i => this._itemKey(i.source, i.id) === this._itemKey(source, item.id));
 
     const season = item.season || (existing ? existing.season : 1);
     const episode = item.episode || (existing ? existing.episode : 1);
@@ -179,6 +194,7 @@ export const storage = {
 
     list.unshift({
       id: item.id,
+      source,
       media_type: mediaType,
       mediaType: mediaType,
       title: item.title || item.name,
@@ -198,10 +214,10 @@ export const storage = {
     localStorage.setItem(STORAGE_KEYS.WATCH_HISTORY, JSON.stringify(list.slice(0, 30)));
   },
 
-  updateProgress(id, season, episode, currentTime, duration) {
+  updateProgress(source, id, season, episode, currentTime, duration) {
     if (!id || typeof currentTime !== 'number' || currentTime < 0) return;
     const list = this.getHistory();
-    const item = list.find(i => i.id === id);
+    const item = list.find(i => this._itemKey(i.source, i.id) === this._itemKey(source, id));
     if (item) {
       item.season = season || item.season || 1;
       item.episode = episode || item.episode || 1;
@@ -213,8 +229,8 @@ export const storage = {
     }
   },
 
-  getProgress(id, season = 1, episode = 1) {
-    const item = this.getHistory().find(i => i.id === id);
+  getProgress(source, id, season = 1, episode = 1) {
+    const item = this.getHistory().find(i => this._itemKey(i.source, i.id) === this._itemKey(source, id));
     if (!item) return null;
     const isTv = item.media_type === 'tv' || item.mediaType === 'tv';
     if (isTv) {
@@ -241,8 +257,8 @@ export const storage = {
     localStorage.removeItem(STORAGE_KEYS.WATCH_HISTORY);
   },
 
-  removeFromHistory(id) {
-    const list = this.getHistory().filter(i => i.id !== id);
+  removeFromHistory(source, id) {
+    const list = this.getHistory().filter(i => this._itemKey(i.source, i.id) !== this._itemKey(source, id));
     localStorage.setItem(STORAGE_KEYS.WATCH_HISTORY, JSON.stringify(list));
   },
 

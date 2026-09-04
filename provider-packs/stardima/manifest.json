@@ -1,6 +1,0 @@
-{
-  "name": "Stardima",
-  "providers": [
-    { "id": "stardima", "file": "stardima.js" }
-  ]
-}

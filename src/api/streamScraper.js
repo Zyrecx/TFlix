@@ -148,3 +148,89 @@ export async function listAvailableEpisodes(providerId, tmdbId, season = null) {
     return null;
   }
 }
+
+/**
+ * Resolves a native-catalog provider's stream for an already-chosen item —
+ * see docs/PROVIDER_PACKS.md's "Native catalogs" section. Bypasses all
+ * TMDB-anchored matching: `nativeId` is the pack's own id for the movie or
+ * episode, straight from listCatalog/search/listNativeEpisodes. Distinct
+ * from resolveDirectStream — never called with a tmdbId/title, never caches
+ * via storage.setConfirmedShowId (the browse-screen selection already *is*
+ * the confirmation), and never subject to fallback-provider rotation
+ * (PlayerModal's nativeMode disables that for this flow entirely).
+ */
+export async function resolveNativeStream(providerId, nativeId, isTv, season = 1, episode = 1) {
+  const available = await isRelayAvailable();
+  if (!available) {
+    throw new Error('Local stream relay is not running. Direct providers require TizenBrew\'s serviceFile support.');
+  }
+
+  const params = new URLSearchParams({
+    provider: providerId,
+    native: '1',
+    confirmedShowId: String(nativeId),
+    isTv: isTv ? '1' : '0',
+    season: String(season),
+    episode: String(episode)
+  });
+
+  const res = await fetchWithTimeout(`${RELAY_BASE}/resolve?${params.toString()}`, RESOLVE_TIMEOUT_MS);
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || `${providerId} failed to resolve`);
+  }
+
+  if (data.embedUrl) {
+    return { embedUrl: data.embedUrl, providerId, providerName: data.providerName };
+  }
+  if (!data.streamUrl) {
+    throw new Error(`${providerId} did not return a stream URL`);
+  }
+  return { streamUrl: data.streamUrl, subtitles: data.subtitles || [], providerId, providerName: data.providerName };
+}
+
+/**
+ * Native-catalog browse/search/season/episode-listing thin clients — see
+ * docs/PROVIDER_PACKS.md's "Native catalogs" section and the relay's
+ * /browse, /search-native, /seasons, /native-episodes endpoints.
+ */
+export async function browseNativeCatalog(providerId, category, page = 1) {
+  const available = await isRelayAvailable();
+  if (!available) throw new Error('Local stream relay is not running.');
+  const params = new URLSearchParams({ provider: providerId, category, page: String(page) });
+  const res = await fetchWithTimeout(`${RELAY_BASE}/browse?${params.toString()}`, RESOLVE_TIMEOUT_MS);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `${providerId} browse failed`);
+  return { items: data.items || [], hasMore: Boolean(data.hasMore) };
+}
+
+export async function searchNativeCatalog(providerId, query) {
+  const available = await isRelayAvailable();
+  if (!available) throw new Error('Local stream relay is not running.');
+  const params = new URLSearchParams({ provider: providerId, q: query });
+  const res = await fetchWithTimeout(`${RELAY_BASE}/search-native?${params.toString()}`, RESOLVE_TIMEOUT_MS);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `${providerId} search failed`);
+  return { items: data.items || [] };
+}
+
+export async function getNativeSeasons(providerId, nativeId) {
+  const available = await isRelayAvailable();
+  if (!available) return { seasons: [] };
+  const params = new URLSearchParams({ provider: providerId, nativeId });
+  const res = await fetchWithTimeout(`${RELAY_BASE}/seasons?${params.toString()}`, RESOLVE_TIMEOUT_MS);
+  const data = await res.json();
+  if (!res.ok) return { seasons: [] };
+  return { seasons: data.seasons || [] };
+}
+
+export async function listNativeEpisodes(providerId, nativeId, seasonId = null) {
+  const available = await isRelayAvailable();
+  if (!available) throw new Error('Local stream relay is not running.');
+  const params = new URLSearchParams({ provider: providerId, nativeId });
+  if (seasonId) params.set('seasonId', seasonId);
+  const res = await fetchWithTimeout(`${RELAY_BASE}/native-episodes?${params.toString()}`, RESOLVE_TIMEOUT_MS);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `${providerId} episode listing failed`);
+  return { episodes: data.episodes || [] };
+}

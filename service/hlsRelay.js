@@ -122,6 +122,74 @@ function fetchRaw(targetUrl, opts, redirects) {
   });
 }
 
+// Used only by /hls. Unlike fetchRaw (which always buffers the full body —
+// needed for JSON/HTML/playlist callers that must inspect the whole
+// response), this pipes a non-playlist upstream response straight through
+// to the client as bytes arrive, and forwards the client's Range header.
+// fetchRaw's full-buffer-then-respond behavior was fine for HLS segments
+// (small) but for a large direct-file provider response (e.g. a
+// progressive-mp4 native-catalog pack) it meant zero bytes reached the
+// player until the *entire* file had downloaded server-side — measured at
+// ~38s for a 130MB file, well past VideoPlayer.js's 15s stream-timeout
+// watchdog, which then fired an incorrect "Timeout (Server slow/offline)"
+// fallback on a stream that was actually fine, just not yet fully buffered.
+// A playlist still needs full buffering (must rewrite every URL inside it
+// before it's valid to send), so that path is unchanged.
+function streamProxy(targetUrl, referer, clientReq, res, redirects) {
+  if (redirects === undefined) redirects = 5;
+  return new Promise(function (resolve, reject) {
+    var u;
+    try {
+      u = new URL(targetUrl);
+    } catch (e) {
+      reject(new Error('Invalid URL: ' + targetUrl));
+      return;
+    }
+    var lib = u.protocol === 'http:' ? http : https;
+    var reqHeaders = Object.assign({ 'User-Agent': DESKTOP_UA }, referer ? { Referer: referer } : {});
+    if (clientReq.headers['range']) reqHeaders['Range'] = clientReq.headers['range'];
+    var req = lib.request(u, { method: 'GET', headers: reqHeaders }, function (upstream) {
+      if ([301, 302, 303, 307, 308].indexOf(upstream.statusCode) !== -1 && upstream.headers.location && redirects > 0) {
+        upstream.resume();
+        var nextUrl = new URL(upstream.headers.location, targetUrl).toString();
+        streamProxy(nextUrl, referer, clientReq, res, redirects - 1).then(resolve, reject);
+        return;
+      }
+      if (upstream.statusCode >= 400) {
+        res.statusCode = upstream.statusCode;
+        res.end('upstream ' + upstream.statusCode);
+        upstream.resume();
+        resolve();
+        return;
+      }
+      var ct = (upstream.headers['content-type'] || '').toLowerCase();
+      var looksLikePlaylist = ct.indexOf('mpegurl') !== -1 || targetUrl.split('?')[0].toLowerCase().slice(-5) === '.m3u8';
+      if (looksLikePlaylist) {
+        var chunks = [];
+        upstream.on('data', function (c) { chunks.push(c); });
+        upstream.on('end', function () {
+          res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+          res.end(rewritePlaylist(Buffer.concat(chunks).toString('utf-8'), targetUrl, referer));
+          resolve();
+        });
+        upstream.on('error', reject);
+        return;
+      }
+      res.statusCode = upstream.statusCode;
+      if (upstream.headers['content-type']) res.setHeader('Content-Type', upstream.headers['content-type']);
+      if (upstream.headers['content-length']) res.setHeader('Content-Length', upstream.headers['content-length']);
+      if (upstream.headers['content-range']) res.setHeader('Content-Range', upstream.headers['content-range']);
+      if (upstream.headers['accept-ranges']) res.setHeader('Accept-Ranges', upstream.headers['accept-ranges']);
+      upstream.pipe(res);
+      upstream.on('end', resolve);
+      upstream.on('error', reject);
+    });
+    req.on('error', reject);
+    req.setTimeout(15000, function () { req.destroy(new Error('Upstream request timed out')); });
+    req.end();
+  });
+}
+
 async function fetchJson(url, headers) {
   var r = await fetchRaw(url, headers);
   if (r.statusCode >= 400 || r.body.length === 0) {
@@ -334,6 +402,29 @@ async function installPack(manifestUrl) {
   fs.mkdirSync(dir, { recursive: true });
   clearDirFiles(dir);
 
+  // Optional `manifest.shared` — plain filenames (e.g. "hosts.js") fetched
+  // and written into this pack's own directory *unvalidated* (no id/resolve
+  // check), purely so provider files in the same pack can `require('./x')`
+  // them for code reuse across multiple site providers in one pack (e.g. a
+  // shared video-host extractor library). This works because, unlike
+  // hlsRelay.js itself, provider files ARE loaded via real `require()` from
+  // real files on disk (see requireFresh) — sibling requires are fine here.
+  // loadCommunityProviders already tolerates non-provider .js files sitting
+  // in a pack dir (skips them with a warning), so no loader-side change was
+  // needed for these to coexist with real providers.
+  var sharedFiles = Array.isArray(manifest.shared) ? manifest.shared : [];
+  for (var s = 0; s < sharedFiles.length; s++) {
+    var sharedName = sharedFiles[s];
+    if (typeof sharedName !== 'string' || !/^[\w.-]+\.js$/.test(sharedName)) {
+      throw new Error('manifest.shared entries must be plain "name.js" filenames');
+    }
+    var sharedUrl = new URL(sharedName, url).toString();
+    var sharedCode = await fetchText(sharedUrl);
+    var sharedDest = path.join(dir, sharedName);
+    fs.writeFileSync(sharedDest, sharedCode);
+    try { delete require.cache[require.resolve(sharedDest)]; } catch (e) { /* not cached yet */ }
+  }
+
   var installed = [];
   var errors = [];
   for (var i = 0; i < manifest.providers.length; i++) {
@@ -442,7 +533,10 @@ function loadAllProviders() {
     return {
       id: p.id, name: p.name, description: p.description || '',
       packManifestUrl: p._packManifestUrl || null, packName: p._packName || null,
-      fuzzyMatch: Boolean(p.fuzzyMatch), supportsAvailability: Boolean(p.supportsAvailability)
+      fuzzyMatch: Boolean(p.fuzzyMatch), supportsAvailability: Boolean(p.supportsAvailability),
+      catalogMode: p.catalogMode || 'tmdb', catalogTypes: p.catalogTypes || [],
+      catalogCategories: p.catalogCategories || [],
+      disableTmdbArtFallback: Boolean(p.disableTmdbArtFallback)
     };
   });
   return { registry: registry, list: list };
@@ -651,7 +745,8 @@ async function main() {
               season: reqUrl.searchParams.get('season') || '1',
               episode: reqUrl.searchParams.get('episode') || '1',
               confirmedShowId: reqUrl.searchParams.get('confirmedShowId') || '',
-              forceConfirm: reqUrl.searchParams.get('forceConfirm') === '1'
+              forceConfirm: reqUrl.searchParams.get('forceConfirm') === '1',
+              native: reqUrl.searchParams.get('native') === '1'
             }, providerHttp);
 
             // Three possible resolve() outcomes, checked in order:
@@ -727,6 +822,119 @@ async function main() {
           return;
         }
 
+        // Native-catalog browse: one page of a catalogMode:'native' provider's
+        // own category listing. See docs/PROVIDER_PACKS.md §listCatalog.
+        if (reqUrl.pathname === '/browse') {
+          var browseProviderId = reqUrl.searchParams.get('provider');
+          var browseProvider = registry.get(browseProviderId);
+          res.setHeader('Content-Type', 'application/json');
+          if (!browseProvider) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'No provider registered for "' + browseProviderId + '"' }));
+            return;
+          }
+          if (browseProvider.catalogMode !== 'native' || typeof browseProvider.listCatalog !== 'function') {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: browseProviderId + ' does not support native catalog browsing' }));
+            return;
+          }
+          try {
+            var browseCategory = reqUrl.searchParams.get('category') || '';
+            var browsePage = Number(reqUrl.searchParams.get('page')) || 1;
+            var browseResult = await browseProvider.listCatalog(browseCategory, browsePage, providerHttp);
+            res.end(JSON.stringify({
+              items: (browseResult && browseResult.items) || [],
+              hasMore: Boolean(browseResult && browseResult.hasMore)
+            }));
+          } catch (e) {
+            res.statusCode = 502;
+            res.end(JSON.stringify({ error: e.message || String(e) }));
+          }
+          return;
+        }
+
+        // Native-catalog search: text search against a provider's own
+        // catalog. Not merged into TFlix's global TMDB search.
+        if (reqUrl.pathname === '/search-native') {
+          var searchProviderId = reqUrl.searchParams.get('provider');
+          var searchProvider = registry.get(searchProviderId);
+          res.setHeader('Content-Type', 'application/json');
+          if (!searchProvider) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'No provider registered for "' + searchProviderId + '"' }));
+            return;
+          }
+          if (searchProvider.catalogMode !== 'native' || typeof searchProvider.search !== 'function') {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: searchProviderId + ' does not support native search' }));
+            return;
+          }
+          try {
+            var searchQuery = reqUrl.searchParams.get('q') || '';
+            var searchResult = await searchProvider.search(searchQuery, providerHttp);
+            res.end(JSON.stringify({ items: (searchResult && searchResult.items) || [] }));
+          } catch (e) {
+            res.statusCode = 502;
+            res.end(JSON.stringify({ error: e.message || String(e) }));
+          }
+          return;
+        }
+
+        // Native season list for a native 'tv' item. Missing getSeasons is
+        // NOT an error — an empty list tells the app to flatten straight to
+        // /native-episodes, distinct from "wrong/unregistered provider".
+        if (reqUrl.pathname === '/seasons') {
+          var seasonsProviderId = reqUrl.searchParams.get('provider');
+          var seasonsProvider = registry.get(seasonsProviderId);
+          res.setHeader('Content-Type', 'application/json');
+          if (!seasonsProvider) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'No provider registered for "' + seasonsProviderId + '"' }));
+            return;
+          }
+          if (seasonsProvider.catalogMode !== 'native' || typeof seasonsProvider.getSeasons !== 'function') {
+            res.end(JSON.stringify({ seasons: [] }));
+            return;
+          }
+          try {
+            var seasonsNativeId = reqUrl.searchParams.get('nativeId') || '';
+            var seasonsResult = await seasonsProvider.getSeasons(seasonsNativeId, providerHttp);
+            res.end(JSON.stringify({ seasons: (seasonsResult && seasonsResult.seasons) || [] }));
+          } catch (e) {
+            res.statusCode = 502;
+            res.end(JSON.stringify({ error: e.message || String(e) }));
+          }
+          return;
+        }
+
+        // Native episode metadata for browsing (distinct from /episodes'
+        // bare-number availability list — see docs/PROVIDER_PACKS.md §0.5).
+        if (reqUrl.pathname === '/native-episodes') {
+          var neProviderId = reqUrl.searchParams.get('provider');
+          var neProvider = registry.get(neProviderId);
+          res.setHeader('Content-Type', 'application/json');
+          if (!neProvider) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'No provider registered for "' + neProviderId + '"' }));
+            return;
+          }
+          if (neProvider.catalogMode !== 'native' || (neProvider.catalogTypes || []).indexOf('tv') === -1 || typeof neProvider.listNativeEpisodes !== 'function') {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: neProviderId + ' does not support native episode listing' }));
+            return;
+          }
+          try {
+            var neNativeId = reqUrl.searchParams.get('nativeId') || '';
+            var neSeasonId = reqUrl.searchParams.get('seasonId') || null;
+            var neResult = await neProvider.listNativeEpisodes(neNativeId, neSeasonId, providerHttp);
+            res.end(JSON.stringify({ episodes: (neResult && neResult.episodes) || [] }));
+          } catch (e) {
+            res.statusCode = 502;
+            res.end(JSON.stringify({ error: e.message || String(e) }));
+          }
+          return;
+        }
+
         if (reqUrl.pathname === '/hls') {
           var target = reqUrl.searchParams.get('url');
           var referer = reqUrl.searchParams.get('ref') || undefined;
@@ -736,22 +944,9 @@ async function main() {
             return;
           }
           try {
-            var upstream = await fetchRaw(target, referer ? { Referer: referer } : undefined);
-            if (upstream.statusCode >= 400) {
-              res.statusCode = upstream.statusCode;
-              res.end('upstream ' + upstream.statusCode);
-              return;
-            }
-            var ct = (upstream.headers['content-type'] || '').toLowerCase();
-            var looksLikePlaylist = ct.indexOf('mpegurl') !== -1 || target.split('?')[0].toLowerCase().slice(-5) === '.m3u8';
-            if (looksLikePlaylist) {
-              res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-              res.end(rewritePlaylist(upstream.body.toString('utf-8'), upstream.finalUrl || target, referer));
-            } else {
-              res.setHeader('Content-Type', ct || 'application/octet-stream');
-              res.end(upstream.body);
-            }
+            await streamProxy(target, referer, req, res);
           } catch (e) {
+            if (res.headersSent) { res.end(); return; }
             res.statusCode = 502;
             res.end('relay error: ' + (e.message || e));
           }

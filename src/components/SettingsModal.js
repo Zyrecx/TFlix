@@ -79,7 +79,11 @@ export class SettingsModal {
       ? `Configured (${currentKey.length > 8 ? currentKey.slice(0, 4) + '••••••••' + currentKey.slice(-4) : '••••••••'})`
       : 'Not Configured (Required)';
 
-    const providers = getProviders();
+    // Excludes catalogMode: 'native' providers — this picker sets the
+    // default for TMDB-driven playback, meaningless for a native provider
+    // (only ever resolved from the dedicated browse flow). See
+    // docs/PROVIDER_PACKS.md's "Native catalogs" §0.7.
+    const providers = getProviders().filter(p => p.catalogMode !== 'native');
     const hasProviders = providers.length > 0;
     if (hasProviders && (!this.selectedProvider || !providers.some(p => p.id === this.selectedProvider))) {
       this.selectedProvider = providers[0].id;
@@ -193,17 +197,24 @@ export class SettingsModal {
             <div style="margin-top: 16px;">
               <div style="font-size: 13px; color: #d4d4d8; font-weight: 700; margin-bottom: 10px;">Choose Default Server:</div>
               <div class="provider-options">
-                ${providers.map(p => `
-                  <button class="provider-btn focusable ${p.id === this.selectedProvider ? 'active' : ''}" data-provider="${p.id}">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                      <div class="name">${p.name} ${p.id === this.selectedProvider ? icon('check', { size: 14 }) : ''}</div>
-                      <span class="hud-badge-tag" style="font-size: 9px; background: ${p.type === 'direct' ? '#16a34a' : '#3f3f46'}; display:inline-flex; align-items:center; gap:3px;">
-                        ${p.type === 'direct' ? `${icon('zap', { size: 10 })} NATIVE HLS` : `${icon('tv', { size: 10 })} EMBED`}
-                      </span>
-                    </div>
-                    <div class="desc">${p.description || 'Streaming provider'}</div>
-                  </button>
-                `).join('')}
+                ${(() => {
+                  // .provider-options is a 2-column grid — only the bottom row's
+                  // buttons should force Down to the relay Recheck button; any
+                  // other row needs plain overlap-based nav to reach the row
+                  // below it inside this same grid.
+                  const lastRowStart = Math.floor((providers.length - 1) / 2) * 2;
+                  return providers.map((p, i) => `
+                    <button class="provider-btn focusable ${p.id === this.selectedProvider ? 'active' : ''}" data-provider="${p.id}"${i >= lastRowStart ? ' data-nav-down="#btn-recheck-relay"' : ''}>
+                      <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div class="name">${p.name} ${p.id === this.selectedProvider ? icon('check', { size: 14 }) : ''}</div>
+                        <span class="hud-badge-tag" style="font-size: 9px; background: ${p.type === 'direct' ? '#16a34a' : '#3f3f46'}; display:inline-flex; align-items:center; gap:3px;">
+                          ${p.type === 'direct' ? `${icon('zap', { size: 10 })} NATIVE HLS` : `${icon('tv', { size: 10 })} EMBED`}
+                        </span>
+                      </div>
+                      <div class="desc">${p.description || 'Streaming provider'}</div>
+                    </button>
+                  `).join('');
+                })()}
               </div>
             </div>
           ` : ''}
@@ -216,11 +227,14 @@ export class SettingsModal {
             Direct HLS providers are resolved by a local relay running on this TV, outside the browser. A "provider pack" adds more sources to it. Only add a pack from someone you trust — it runs code on this device.
           </p>
 
-          <div style="background: #1a1a24; padding: 12px 18px; border-radius: 8px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
-            <div>
-              <div style="font-size: 11px; color: #71717a; text-transform: uppercase; font-weight: 700;">Local Relay</div>
-              <div style="font-size: 14px; font-weight: 600; color: ${this.relayStatus ? '#4ade80' : this.relayStatus === false ? '#ef4444' : '#a1a1aa'};">
-                ${this.relayStatus === null ? 'Checking…' : this.relayStatus ? `${icon('check', { size: 14 })} Reachable (${RELAY_BASE})` : `${icon('triangle-alert', { size: 14 })} Not reachable`}
+          <div style="background: rgba(59, 130, 246, 0.08); border-left: 3px solid #3b82f6; padding: 12px 18px 12px 15px; border-radius: 8px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <div style="color: #60a5fa; display: flex;">${icon('wifi', { size: 20 })}</div>
+              <div>
+                <div style="font-size: 11px; color: #93c5fd; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">System &middot; Local Relay</div>
+                <div style="font-size: 14px; font-weight: 600; color: ${this.relayStatus ? '#4ade80' : this.relayStatus === false ? '#ef4444' : '#a1a1aa'};">
+                  ${this.relayStatus === null ? 'Checking…' : this.relayStatus ? `${icon('check', { size: 14 })} Reachable (${RELAY_BASE})` : `${icon('triangle-alert', { size: 14 })} Not reachable`}
+                </div>
               </div>
             </div>
             <button class="btn btn-secondary focusable" id="btn-recheck-relay" style="padding: 6px 14px; font-size: 13px;">${icon('refresh-cw', { size: 14 })} Recheck</button>

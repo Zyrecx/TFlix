@@ -95,15 +95,15 @@ export class DetailsModal {
     const isTv = this.details.media_type === 'tv' || this.details.mediaType === 'tv';
     const title = this.details.title || this.details.name;
     const backdropUrl = tmdb.getBackdropUrl(this.details.backdrop_path, 'w1280');
-    const posterUrl = tmdb.getImageUrl(this.details.poster_path, 'w500');
+    const posterUrl = tmdb.getImageUrl(this.details.poster_path, 'w342');
     const year = (this.details.release_date || this.details.first_air_date || '').substring(0, 4);
     const rating = this.details.vote_average ? this.details.vote_average.toFixed(1) : 'N/A';
     const runtime = this.details.runtime ? `${this.details.runtime} mins` : (this.details.number_of_seasons ? `${this.details.number_of_seasons} Seasons` : '');
     const genres = (this.details.genres || []).map(g => `<span class="genre-tag">${g.name}</span>`).join('');
-    const inWatchlist = storage.isInWatchlist(this.details.id);
+    const inWatchlist = storage.isInWatchlist('tmdb', this.details.id);
 
     // Get last watched season/episode for resume
-    const historyItem = storage.getHistory().find(h => h.id === this.details.id);
+    const historyItem = storage.getHistory().find(h => h.source === 'tmdb' && h.id === this.details.id);
     const resumeSeason = historyItem ? historyItem.season : 1;
     const resumeEpisode = historyItem ? historyItem.episode : 1;
 
@@ -173,6 +173,7 @@ export class DetailsModal {
         media_type: isTv ? 'tv' : 'movie',
         mediaType: isTv ? 'tv' : 'movie',
         title,
+        name: this.details.name || this.details.title,
         season: resumeSeason,
         episode: resumeEpisode,
         poster_path: this.details.poster_path,
@@ -185,8 +186,8 @@ export class DetailsModal {
 
     const watchlistBtn = this.modalEl.querySelector('#details-watchlist-btn');
     watchlistBtn.addEventListener('click', () => {
-      if (storage.isInWatchlist(this.details.id)) {
-        storage.removeFromWatchlist(this.details.id);
+      if (storage.isInWatchlist('tmdb', this.details.id)) {
+        storage.removeFromWatchlist('tmdb', this.details.id);
         watchlistBtn.innerHTML = `${icon('bookmark-plus')} Watchlist`;
       } else {
         storage.addToWatchlist(this.details);
@@ -324,7 +325,7 @@ export class DetailsModal {
       // and UP does nothing (see spatialNav.js's data-nav-up handling).
       epCard.dataset.navUp = this.ranges ? '#details-range-btn' : '.season-btn.active';
 
-      const stillUrl = ep.still_path ? tmdb.getImageUrl(ep.still_path, 'w500') : tmdb.getImageUrl(this.details.backdrop_path, 'w500');
+      const stillUrl = ep.still_path ? tmdb.getImageUrl(ep.still_path, 'w342') : tmdb.getImageUrl(this.details.backdrop_path, 'w342');
 
       // Only render a badge once availability is actually known (see
       // loadAvailability) — absence of data means "unknown", never "missing".
@@ -352,6 +353,7 @@ export class DetailsModal {
           media_type: 'tv',
           mediaType: 'tv',
           title: `${this.details.name || this.details.title} - S${seasonNumber}E${ep.episode_number}`,
+          name: this.details.name || this.details.title,
           season: seasonNumber,
           episode: ep.episode_number,
           poster_path: this.details.poster_path,

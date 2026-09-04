@@ -240,7 +240,7 @@ export class EpisodeDrawer {
       // above it and UP does nothing (see spatialNav.js's data-nav-up).
       card.dataset.navUp = this.ranges ? '#drawer-range-btn' : '.season-tab-btn.active';
 
-      const stillUrl = ep.still_path ? tmdb.getImageUrl(ep.still_path, 'w500') : tmdb.getImageUrl(this.details?.backdrop_path, 'w500');
+      const stillUrl = ep.still_path ? tmdb.getImageUrl(ep.still_path, 'w342') : tmdb.getImageUrl(this.details?.backdrop_path, 'w342');
 
       // See DetailsModal.js's identical logic — absence of data means
       // "unknown", never "missing".

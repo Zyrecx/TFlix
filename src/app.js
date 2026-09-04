@@ -5,11 +5,11 @@ import { createHeroBanner } from './components/HeroBanner.js';
 import { createMediaRow } from './components/MediaRow.js';
 import { createContinueWatchingRow } from './components/ContinueWatchingRow.js';
 import { DetailsModal } from './components/DetailsModal.js';
-import { PlayerModal } from './components/PlayerModal.js';
 import { SearchModal } from './components/SearchModal.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { SetupTourModal } from './components/SetupTourModal.js';
-import { refreshRelayProviders } from './api/providers.js';
+import { refreshRelayProviders, getNativeCatalogProviders, getNativeSeasons, listNativeEpisodes } from './api/providers.js';
+import { ProviderBrowseScreen } from './components/ProviderBrowseScreen.js';
 import { setupTizenShim } from '../dev/tizen-shim.js';
 import { setupTvRemoteSimulator } from '../dev/tv-remote-hud.js';
 import { icon } from './ui/icons.js';
@@ -37,7 +37,9 @@ class TFlixApp {
 
     this.renderShell();
     nav.init();
-    refreshRelayProviders(); // don't block first paint on this
+    // don't block first paint on this — the Providers nav entry (native-
+    // catalog packs only) appears once this resolves, see updateProvidersNavVisibility.
+    refreshRelayProviders().then(() => this.updateProvidersNavVisibility());
 
     // Permanent, never-popped root back handler — sits at the bottom of
     // nav's back-handler stack so it only fires once every screen-level
@@ -128,6 +130,7 @@ class TFlixApp {
           ${navItem('movies', 'film', 'Movies')}
           ${navItem('tv', 'tv', 'TV Shows')}
           ${navItem('watchlist', 'bookmark', 'Watchlist')}
+          <div id="nav-providers-slot"></div>
           <button class="nav-btn focusable" id="nav-search-btn">${icon('search', { size: 22 })}<span>Search</span></button>
           <button class="nav-btn focusable" id="nav-settings-btn">${icon('settings', { size: 22 })}<span>Settings</span></button>
         </div>
@@ -159,6 +162,32 @@ class TFlixApp {
     this.navBarEl.querySelector('#nav-settings-btn').addEventListener('click', () => {
       this.openSettings();
     });
+
+    this.updateProvidersNavVisibility();
+  }
+
+  // The Providers tab only exists when at least one installed pack has its
+  // own native catalog — hidden otherwise rather than shown empty (see
+  // NATIVE_CATALOG_PLAN.md §6). renderShell() runs before
+  // refreshRelayProviders() resolves, so this patches the nav in after the
+  // fact instead of being computed at initial render time.
+  updateProvidersNavVisibility() {
+    const slot = this.navBarEl && this.navBarEl.querySelector('#nav-providers-slot');
+    if (!slot) return;
+    const hasNative = getNativeCatalogProviders().length > 0;
+    if (!hasNative) {
+      slot.innerHTML = '';
+      if (this.activeTab === 'providers') this.switchTab('home');
+      return;
+    }
+    if (slot.querySelector('.nav-btn')) return; // already rendered
+    slot.innerHTML = `
+      <button class="nav-btn focusable ${this.activeTab === 'providers' ? 'active' : ''}" data-tab="providers">
+        ${icon('compass', { size: 22 })}
+        <span>Providers</span>
+      </button>
+    `;
+    slot.querySelector('.nav-btn').addEventListener('click', () => this.switchTab('providers'));
   }
 
   async switchTab(tab) {
@@ -174,7 +203,11 @@ class TFlixApp {
   }
 
   async loadTab(tab) {
-    if (tab !== 'watchlist' && !storage.hasApiKey()) {
+    // Native-catalog providers are explicitly TMDB-independent (see
+    // docs/PROVIDER_PACKS.md's "Native catalogs" section) — gating the
+    // Providers tab behind a TMDB key would defeat the point for a user who
+    // doesn't have/want one.
+    if (tab !== 'watchlist' && tab !== 'providers' && !storage.hasApiKey()) {
       this.mainContentEl.innerHTML = `
         <div style="padding: 64px 48px; text-align: center; max-width: 650px; margin: 0 auto;">
           <div style="margin-bottom: 16px; color: #e50914;">${icon('key', { size: 54 })}</div>
@@ -209,6 +242,8 @@ class TFlixApp {
         await this.renderTvTab();
       } else if (tab === 'watchlist') {
         this.renderWatchlistTab();
+      } else if (tab === 'providers') {
+        this.renderProvidersTab();
       }
       // Re-focus first element after view render
       setTimeout(() => {
@@ -256,7 +291,7 @@ class TFlixApp {
     if (history.length > 0) {
       const historyRow = createContinueWatchingRow({
         items: history,
-        onItemSelect: (item) => this.openDetails(item)
+        onItemSelect: (item) => this.resumeHistoryItem(item)
       });
       this.mainContentEl.appendChild(historyRow);
     }
@@ -439,7 +474,7 @@ class TFlixApp {
         const posterUrl = tmdb.getImageUrl(item.poster_path, 'w500');
         const year = (item.release_date || item.first_air_date || '').substring(0, 4);
         const isTv = item.media_type === 'tv' || item.mediaType === 'tv';
-        const progressItem = history.find(h => h.id === item.id);
+        const progressItem = history.find(h => h.source === (item.source || 'tmdb') && h.id === item.id);
         const progressLabel = progressItem && progressItem.progress > 0
           ? `${progressItem.progress}% watched${isTv && progressItem.season ? ` · S${progressItem.season} E${progressItem.episode}` : ''}`
           : (isTv ? 'TV' : 'Movie');
@@ -457,7 +492,7 @@ class TFlixApp {
         `;
 
         card.addEventListener('click', () => {
-          this.openDetails(item);
+          this.openWatchlistItem(item);
         });
 
         grid.appendChild(card);
@@ -465,6 +500,146 @@ class TFlixApp {
     }
 
     this.mainContentEl.appendChild(container);
+  }
+
+  // Watchlist card click. A native movie's stored `id` is already what
+  // resolve() needs (no episode indirection), so it can relaunch directly.
+  // A native TV show's watchlist entry has no season/episode/episode-id
+  // context to resume from (unlike a Continue Watching record — see
+  // resumeHistoryItem), so the honest move is to drop the user into that
+  // provider's own browse screen to pick an episode, not guess one.
+  openWatchlistItem(item) {
+    if (!item.source || item.source === 'tmdb') {
+      this.openDetails(item);
+      return;
+    }
+    const isTv = item.media_type === 'tv' || item.mediaType === 'tv';
+    if (!isTv) {
+      this.openPlayer(item, { nativeMode: true });
+      return;
+    }
+    const provider = getNativeCatalogProviders().find(p => p.id === item.source);
+    if (provider) this.openProviderBrowse(provider);
+  }
+
+  // Lists installed native-catalog providers as simple cards — not
+  // createMediaRow, which expects TMDB-shaped media items. Tapping one opens
+  // the per-provider browse screen. See NATIVE_CATALOG_PLAN.md §3.2/3.3.
+  renderProvidersTab() {
+    this.mainContentEl.innerHTML = '';
+    const providers = getNativeCatalogProviders();
+
+    if (this.activeProviderBrowseScreen) {
+      this.activeProviderBrowseScreen = null;
+    }
+
+    if (providers.length === 0) {
+      const container = document.createElement('div');
+      container.style.padding = '100px 48px 48px';
+      container.innerHTML = `
+        <div style="text-align: center; padding: 80px 20px; color: #a1a1aa;">
+          <div style="margin-bottom: 16px; color: #fbbf24; display: flex; justify-content: center;">${icon('compass', { size: 48 })}</div>
+          <h2 style="color: #fff; margin-bottom: 10px;">No Native-Catalog Providers Installed</h2>
+          <p>Install a provider pack with its own browsable catalog from Settings to see it here.</p>
+        </div>
+      `;
+      this.mainContentEl.appendChild(container);
+      return;
+    }
+
+    const container = document.createElement('div');
+    container.style.padding = '100px 48px 48px';
+    container.innerHTML = `<h2 style="font-size: 28px; font-weight: 800; margin-bottom: 24px;">Providers</h2>`;
+
+    const grid = document.createElement('div');
+    grid.className = 'search-results-grid';
+    grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(220px, 1fr))';
+
+    providers.forEach(provider => {
+      const card = document.createElement('div');
+      card.className = 'media-card focusable';
+      card.setAttribute('tabindex', '0');
+      card.style.aspectRatio = 'auto';
+      card.innerHTML = `
+        <div style="padding: 24px; display:flex; flex-direction:column; gap:8px; align-items:center; text-align:center;">
+          ${icon('compass', { size: 32 })}
+          <div class="media-card-title" style="margin-top:8px;">${provider.name}</div>
+          <div style="color:#71717a; font-size:12px;">${(provider.catalogTypes || []).join(', ') || 'unknown types'}</div>
+        </div>
+      `;
+      card.addEventListener('click', () => this.openProviderBrowse(provider));
+      grid.appendChild(card);
+    });
+
+    container.appendChild(grid);
+    this.mainContentEl.appendChild(container);
+  }
+
+  openProviderBrowse(provider) {
+    this.mainContentEl.innerHTML = '';
+    const backBtn = document.createElement('button');
+    backBtn.className = 'btn btn-secondary focusable';
+    backBtn.style.cssText = 'margin-bottom: 20px; padding: 8px 16px;';
+    backBtn.innerHTML = `${icon('chevron-left', { size: 16 })} All Providers`;
+    backBtn.addEventListener('click', () => this.renderProvidersTab());
+    this.mainContentEl.appendChild(backBtn);
+
+    this.activeProviderBrowseScreen = new ProviderBrowseScreen({
+      provider,
+      onPlayNative: (media) => this.openPlayer(media, { nativeMode: true })
+    });
+    this.mainContentEl.appendChild(this.activeProviderBrowseScreen.render());
+    setTimeout(() => nav.focusFirstAvailable(), 50);
+  }
+
+  // Continue Watching card click. TMDB-sourced history opens Details (its
+  // resume-season/episode UI, cast, etc) rather than jumping straight into
+  // playback — a native item should feel the same, not skip straight to
+  // the player. It has no TMDB id for DetailsModal itself, so this opens
+  // that provider's own browse screen and its lightweight native-details
+  // overlay instead (see ProviderBrowseScreen.js's openNativeDetails),
+  // pre-resolved to a "Resume S{season} E{episode}" button. `item.id` in a
+  // native history record is the show's own native id (stable across
+  // episodes, see ProviderBrowseScreen.js's nativeShowId), not the specific
+  // episode id resolve() needs, so a TV resume has to re-look-up which
+  // episode matches the saved season/episode numbers first.
+  async resumeHistoryItem(item) {
+    if (!item.source || item.source === 'tmdb') {
+      this.openDetails(item);
+      return;
+    }
+
+    const provider = getNativeCatalogProviders().find(p => p.id === item.source);
+    if (!provider) {
+      // Pack got uninstalled since this was watched — nothing to show a
+      // details screen from, so playback is the only option left.
+      this.openPlayer(item, { nativeMode: true });
+      return;
+    }
+
+    const isTv = item.media_type === 'tv' || item.mediaType === 'tv';
+    const native = { id: item.id, title: item.title || item.name, poster: item.poster_path || null, type: isTv ? 'tv' : 'movie' };
+    this.openProviderBrowse(provider);
+    const screen = this.activeProviderBrowseScreen;
+
+    if (!isTv) {
+      screen.openNativeDetails({ _native: native });
+      return;
+    }
+
+    let resume = null;
+    try {
+      const season = item.season || 1;
+      const { seasons } = await getNativeSeasons(item.source, item.id);
+      const seasonId = seasons.length > 0 ? (seasons[season - 1] || seasons[0]).id : null;
+      const { episodes } = await listNativeEpisodes(item.source, item.id, seasonId);
+      const targetEpisode = Number(item.episode) || 1;
+      const match = episodes.find(ep => Number(ep.number) === targetEpisode) || episodes[0];
+      if (match) resume = { season, episodeId: match.id, episodeNumber: match.number };
+    } catch (err) {
+      console.warn('[TFlixApp] Failed to resolve resume episode:', err);
+    }
+    screen.openNativeDetails({ _native: native }, resume);
   }
 
   openDetails(item) {
@@ -480,14 +655,26 @@ class TFlixApp {
     modal.render();
   }
 
-  openPlayer(media) {
+  async openPlayer(media, { nativeMode = false } = {}) {
+    // Dynamic import, not a static one — PlayerModal pulls in hls.js, which
+    // is otherwise fetched/parsed at app cold start (via app.js's top-level
+    // imports) even though most sessions spend a moment on the home screen
+    // before ever opening a video. Loading it on first actual playback
+    // trims that off Tizen's cold-start path; the ~1 network round trip of
+    // latency here is invisible next to the modal's own render/mount time.
+    const { PlayerModal } = await import('./components/PlayerModal.js');
     const modal = new PlayerModal({
       media,
+      nativeMode,
       onNextEpisode: (nextMedia) => {
-        this.openPlayer(nextMedia);
+        this.openPlayer(nextMedia, { nativeMode });
       },
       onClose: () => {
-        if (this.activeTab === 'home') {
+        if (nativeMode) {
+          if (this.activeProviderBrowseScreen) {
+            nav.focusFirstAvailable();
+          }
+        } else if (this.activeTab === 'home') {
           this.loadTab('home');
         }
       }
@@ -508,6 +695,11 @@ class TFlixApp {
   openSettings() {
     const modal = new SettingsModal({
       onSettingsChanged: () => {
+        // Settings installs/uninstalls packs via providers.js's own
+        // refreshRelayProviders() call, not this class's — the Providers nav
+        // entry (native-catalog packs only) needs its own refresh here or it
+        // stays stuck at whatever it was on app load until a restart.
+        this.updateProvidersNavVisibility();
         this.loadTab(this.activeTab);
       }
     });
